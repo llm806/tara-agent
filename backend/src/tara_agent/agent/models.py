@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tara_agent.domain.contracts import ResultWarning
 
@@ -41,6 +41,89 @@ class ModelUsage(BaseModel):
     reasoning_tokens: int | None = Field(default=None, ge=0)
 
 
+class ConversationMessage(BaseModel):
+    """提供给本次执行的单条历史对话。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2_000)
+    trace_id: UUID | None = None
+
+
+class AnalysisReference(BaseModel):
+    """供后续请求引用的一次已完成分析摘要。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: UUID
+    question: str = Field(min_length=1, max_length=2_000)
+    answer: str = Field(max_length=1_000)
+    tool_name: ToolName
+    tool_arguments: dict[str, Any]
+    result_summary: dict[str, Any]
+    warnings: list[str] = Field(default_factory=list, max_length=20)
+    sources: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ConversationContext(BaseModel):
+    """经过长度限制的会话上下文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[ConversationMessage] = Field(default_factory=list, max_length=8)
+    analysis_references: list[AnalysisReference] = Field(default_factory=list)
+
+
+class RouteKind(StrEnum):
+    DIRECT_ANSWER = "direct_answer"
+    ANALYSIS = "analysis"
+    CLARIFY = "clarify"
+    UNSUPPORTED = "unsupported"
+
+
+class AnalysisCapability(StrEnum):
+    SAMPLE_QUERY = "sample_query"
+    SAMPLE_DETAILS = "sample_details"
+    TAXON_QUERY = "taxon_query"
+    TAXON_ABUNDANCE = "taxon_abundance"
+    DIVERSITY_ANALYSIS = "diversity_analysis"
+    ENVIRONMENT_ASSOCIATION = "environment_association"
+
+
+class RouteDecision(BaseModel):
+    """统一请求入口产生的结构化判断。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: RouteKind
+    rationale: str = Field(min_length=1, max_length=300)
+    response: str | None = Field(default=None, max_length=2_000)
+    capability_requirements: list[AnalysisCapability] = Field(
+        default_factory=list,
+        max_length=10,
+    )
+    analysis_reference_ids: list[UUID] = Field(default_factory=list)
+    usage: ModelUsage | None = None
+
+    @field_validator("analysis_reference_ids")
+    @classmethod
+    def deduplicate_analysis_references(cls, values: list[UUID]) -> list[UUID]:
+        return list(dict.fromkeys(values))
+
+    @model_validator(mode="after")
+    def validate_response(self) -> RouteDecision:
+        if self.kind is RouteKind.ANALYSIS:
+            self.response = None
+            return self
+        if self.response is None or not self.response.strip():
+            raise ValueError("非分析路由必须包含面向用户的回复")
+        if self.kind is not RouteKind.DIRECT_ANSWER:
+            self.analysis_reference_ids = []
+        self.response = self.response.strip()
+        return self
+
+
 class ToolPlan(BaseModel):
     """模型选定的一次受限 MCP 工具调用。"""
 
@@ -64,7 +147,7 @@ class ModelStreamDelta:
 class AgentStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    stage: Literal["understand", "execute", "answer"]
+    stage: Literal["route", "understand", "execute", "answer", "respond"]
     title: str
     detail: str
 
@@ -105,7 +188,8 @@ class AgentResponse(BaseModel):
     reasoning: str
     answer: str
     model: str
-    tool: ToolTrace
+    route: RouteDecision | None = None
+    tool: ToolTrace | None = None
     steps: list[AgentStep]
     result: dict[str, Any]
     charts: list[ChartSpec]

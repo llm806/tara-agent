@@ -12,6 +12,16 @@ export type HealthResponse = {
   datasets: DatasetStatus[];
 };
 
+export type QuestionSuggestion = {
+  id: string;
+  category: string;
+  question: string;
+};
+
+export type QuestionSuggestionListResponse = {
+  items: QuestionSuggestion[];
+};
+
 export type AuthUser = {
   id: string;
   email: string;
@@ -25,9 +35,17 @@ export type AuthResponse = {
 };
 
 export type AgentStep = {
-  stage: "understand" | "execute" | "answer";
+  stage: "route" | "understand" | "execute" | "answer" | "respond";
   title: string;
   detail: string;
+};
+
+export type RouteDecision = {
+  kind: "direct_answer" | "analysis" | "clarify" | "unsupported";
+  rationale: string;
+  response?: string | null;
+  capability_requirements: string[];
+  analysis_reference_ids: string[];
 };
 
 export type ResultWarning = {
@@ -51,11 +69,12 @@ export type AgentResponse = {
   reasoning: string;
   answer: string;
   model: string;
-  tool: {
+  route?: RouteDecision | null;
+  tool?: {
     name: string;
     arguments: Record<string, unknown>;
     summary: string;
-  };
+  } | null;
   steps: AgentStep[];
   result: Record<string, unknown>;
   charts: ChartSpec[];
@@ -133,7 +152,6 @@ export type TraceSummary = {
   id: string;
   session_id: string;
   question: string | null;
-  parent_trace_id: string | null;
   correlation_id: string | null;
   workflow_name: string;
   workflow_version: string | null;

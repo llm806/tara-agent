@@ -4,7 +4,12 @@ from uuid import uuid4
 
 import pytest
 
-from tara_agent.agent.models import AgentResponse, AgentStreamEvent, ToolTrace
+from tara_agent.agent.models import (
+    AgentResponse,
+    AgentStreamEvent,
+    RouteDecision,
+    ToolTrace,
+)
 from tara_agent.agent.runtime import PersistentAgentRun
 from tara_agent.agent.workflow import WorkflowTaskEvent
 from tara_agent.observability.execution import TraceObservationEvent
@@ -33,8 +38,9 @@ class RuntimeRepository:
 class DynamicWorkflowAgent:
     workflow_name = "dynamic_workflow"
     workflow_title = "动态工作流"
+    shared_resource_snapshot: list[dict[str, str]] = []
 
-    async def stream_execution(self, question: str):
+    async def stream_execution(self, question: str, context=None):
         yield WorkflowTaskEvent(
             task_id="task-1",
             node_name="branch_a",
@@ -120,6 +126,54 @@ class DynamicWorkflowAgent:
         )
 
 
+class FailingWorkflowAgent:
+    workflow_name = "failing_workflow"
+    workflow_title = "失败工作流"
+    shared_resource_snapshot: list[dict[str, str]] = []
+
+    async def stream_execution(self, question: str, context=None):
+        yield WorkflowTaskEvent(
+            task_id="task-1",
+            node_name="understand",
+            node_title="理解问题",
+            phase="started",
+            input_data={"question": question},
+        )
+        raise ValueError("原始执行错误")
+
+
+class DirectResponseAgent:
+    workflow_name = "direct_response"
+    workflow_title = "直接回答"
+    shared_resource_snapshot: list[dict[str, str]] = []
+
+    async def stream_execution(self, question: str, context=None):
+        yield AgentStreamEvent(
+            event="complete",
+            response=AgentResponse(
+                question=question,
+                reasoning="",
+                answer="当前支持样本和分类群查询。",
+                model="test-model",
+                route=RouteDecision(
+                    kind="direct_answer",
+                    rationale="系统能力咨询。",
+                    response="当前支持样本和分类群查询。",
+                ),
+                steps=[],
+                result={},
+                charts=[],
+                warnings=[],
+                sources=[],
+            ),
+        )
+
+
+class CleanupFailingRepository(RuntimeRepository):
+    async def update_span(self, record: SpanRecord) -> None:
+        raise RuntimeError("节点状态写入失败")
+
+
 @pytest.mark.anyio
 async def test_persistent_run_records_dynamic_langgraph_tasks() -> None:
     repository = RuntimeRepository()
@@ -175,5 +229,54 @@ async def test_persistent_run_records_dynamic_langgraph_tasks() -> None:
     }
     assert spans[3].attributes["langgraph_task_id"] == "task-2"
     assert spans[4].tool_name == "find_samples"
+    assert repository.completed is True
+    assert repository.failed is False
+
+
+@pytest.mark.anyio
+async def test_persistent_run_preserves_original_error_when_span_cleanup_fails() -> None:
+    repository = CleanupFailingRepository()
+    run = StartedRun(
+        session_id=uuid4(),
+        trace_id=uuid4(),
+        user_message_id=uuid4(),
+        assistant_message_id=uuid4(),
+        started_at=datetime.now(UTC),
+    )
+    execution = PersistentAgentRun(
+        agent=cast(Any, FailingWorkflowAgent()),
+        repository=cast(Any, repository),
+        run=run,
+        question="触发失败",
+    )
+
+    with pytest.raises(ValueError, match="原始执行错误") as raised:
+        _ = [event async for event in execution.stream()]
+
+    assert repository.failed is True
+    assert any("节点状态写入失败" in note for note in raised.value.__notes__)
+
+
+@pytest.mark.anyio
+async def test_persistent_run_completes_without_a_tool_call() -> None:
+    repository = RuntimeRepository()
+    run = StartedRun(
+        session_id=uuid4(),
+        trace_id=uuid4(),
+        user_message_id=uuid4(),
+        assistant_message_id=uuid4(),
+        started_at=datetime.now(UTC),
+    )
+    execution = PersistentAgentRun(
+        agent=cast(Any, DirectResponseAgent()),
+        repository=cast(Any, repository),
+        run=run,
+        question="这个系统能做什么？",
+    )
+
+    events = [event async for event in execution.stream()]
+
+    assert events[-1].response is not None
+    assert events[-1].response.tool is None
     assert repository.completed is True
     assert repository.failed is False

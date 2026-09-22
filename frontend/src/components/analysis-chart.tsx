@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Download } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { Config, Data, Layout } from "plotly.js";
 
+import { createDownloadName } from "@/lib/downloads";
 import type { ChartSpec } from "@/lib/types";
 
 type AnalysisChartProps = {
@@ -11,36 +13,90 @@ type AnalysisChartProps = {
 
 export function AnalysisChart({ chart }: AnalysisChartProps) {
   const chartRef = useRef<HTMLDivElement>(null);
+  const plotlyRef = useRef<typeof import("plotly.js-dist-min").default | null>(null);
+  const [ready, setReady] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
-    let plotly: typeof import("plotly.js-dist-min").default | undefined;
     const element = chartRef.current;
 
     async function renderChart() {
-      plotly = (await import("plotly.js-dist-min")).default;
-      if (disposed || !element) {
-        return;
+      try {
+        const plotly = (await import("plotly.js-dist-min")).default;
+        if (disposed || !element) {
+          return;
+        }
+        plotlyRef.current = plotly;
+        const theme = chartTheme();
+        await plotly.react(
+          element,
+          chartData(chart, theme),
+          chartLayout(chart, theme),
+          chartConfig,
+        );
+        if (!disposed) {
+          setReady(true);
+        }
+      } catch {
+        if (!disposed) {
+          setError("图表加载失败");
+        }
       }
-      const theme = chartTheme();
-      await plotly.react(
-        element,
-        chartData(chart, theme),
-        chartLayout(chart, theme),
-        chartConfig,
-      );
     }
 
     void renderChart();
     return () => {
       disposed = true;
-      if (plotly && element) {
-        plotly.purge(element);
+      if (plotlyRef.current && element) {
+        plotlyRef.current.purge(element);
       }
+      plotlyRef.current = null;
     };
   }, [chart]);
 
-  return <div ref={chartRef} className="analysis-chart" aria-label={chart.title} />;
+  async function handleDownload() {
+    const element = chartRef.current;
+    const plotly = plotlyRef.current;
+    if (!element || !plotly || !ready) {
+      return;
+    }
+
+    setDownloading(true);
+    setError(null);
+    try {
+      await plotly.downloadImage(element, {
+        format: "png",
+        width: null,
+        height: null,
+        filename: createDownloadName(chart.title),
+      });
+    } catch {
+      setError("图表下载失败，请重试");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="artifact-toolbar">
+        <button
+          type="button"
+          className="artifact-download"
+          disabled={!ready || downloading}
+          onClick={() => void handleDownload()}
+          aria-label={`下载图表 ${chart.title}`}
+        >
+          <Download size={14} aria-hidden="true" />
+          {downloading ? "正在下载" : "下载 PNG"}
+        </button>
+      </div>
+      <div ref={chartRef} className="analysis-chart" aria-label={chart.title} />
+      {error ? <p className="artifact-error" role="status">{error}</p> : null}
+    </>
+  );
 }
 
 const chartConfig: Partial<Config> = {
@@ -48,7 +104,7 @@ const chartConfig: Partial<Config> = {
   responsive: true,
   showSendToCloud: false,
   topojsonURL: "/plotly-topojson/",
-  modeBarButtonsToRemove: ["lasso2d", "select2d"],
+  modeBarButtonsToRemove: ["lasso2d", "select2d", "toImage"],
 };
 
 type ChartTheme = {

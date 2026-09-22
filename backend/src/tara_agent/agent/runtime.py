@@ -8,8 +8,12 @@ from typing import Any
 from uuid import UUID
 
 from tara_agent import __version__
+from tara_agent.agent.conversation import (
+    build_analysis_reference,
+    build_conversation_context,
+)
 from tara_agent.agent.graph import TaraAgent
-from tara_agent.agent.models import AgentResponse, AgentStreamEvent
+from tara_agent.agent.models import AgentResponse, AgentStreamEvent, ConversationMessage
 from tara_agent.agent.workflow import WorkflowTaskEvent
 from tara_agent.observability.contracts import ObservationKind, ObservationUpdate
 from tara_agent.observability.execution import TraceObservationEvent
@@ -74,6 +78,24 @@ class PersistentAgentRun:
         self.repository = repository
         self.run_record = run
         self.question = question
+        analysis_references = []
+        for trace in run.analysis_traces:
+            reference = build_analysis_reference(trace.trace_id, trace.response_data)
+            if reference is not None:
+                analysis_references.append(reference)
+        self.context = build_conversation_context(
+            (
+                ConversationMessage(
+                    role=message.role,
+                    content=message.content.strip()[:2_000],
+                    trace_id=message.trace_id,
+                )
+                for message in run.context_messages
+                if message.role in {"user", "assistant"} and message.content.strip()
+            ),
+            analysis_references,
+            question=question,
+        )
 
     async def stream(self) -> AsyncIterator[AgentStreamEvent]:
         recorder = TraceRecorder(self.repository, self.run_record.trace_id)
@@ -82,8 +104,14 @@ class PersistentAgentRun:
             ObservationKind.WORKFLOW,
             started_at=self.run_record.started_at,
             details=ObservationUpdate(
-                input_data={"question": self.question},
-                attributes={"workflow_name": self.agent.workflow_name},
+                input_data={
+                    "question": self.question,
+                    "conversation_context": self.context.model_dump(mode="json"),
+                },
+                attributes={
+                    "workflow_name": self.agent.workflow_name,
+                    "resources": self.agent.shared_resource_snapshot,
+                },
             ),
         )
         task_span_ids: dict[str, UUID] = {}
@@ -95,7 +123,7 @@ class PersistentAgentRun:
         )
 
         try:
-            async for event in self.agent.stream_execution(self.question):
+            async for event in self.agent.stream_execution(self.question, self.context):
                 now = datetime.now(UTC)
                 if isinstance(event, WorkflowTaskEvent):
                     await self._record_workflow_task(
@@ -131,7 +159,12 @@ class PersistentAgentRun:
                     ended_at=now,
                     details=ObservationUpdate(
                         output_data={
-                            "tool_name": response.tool.name.value,
+                            "route": (
+                                response.route.kind.value if response.route is not None else None
+                            ),
+                            "tool_name": (
+                                response.tool.name.value if response.tool is not None else None
+                            ),
                             "answer": response.answer,
                         }
                     ),
@@ -142,14 +175,31 @@ class PersistentAgentRun:
 
             raise RuntimeError("Agent 在返回完整响应前结束")
         except BaseException as error:
-            ended_at = datetime.now(UTC)
-            error_code = type(error).__name__
-            error_message = str(error) or "Agent 执行被中断"
+            await self._record_failure(recorder, error)
+            raise
+
+    async def _record_failure(
+        self,
+        recorder: TraceRecorder,
+        error: BaseException,
+    ) -> None:
+        """尽量关闭全部失败记录，同时保留触发失败的原始异常。"""
+
+        ended_at = datetime.now(UTC)
+        error_code = type(error).__name__
+        error_message = str(error) or "Agent 执行被中断"
+        cleanup_errors: list[Exception] = []
+
+        try:
             await recorder.fail_open_observations(
                 error_code=error_code,
                 error_message=error_message,
                 ended_at=ended_at,
             )
+        except Exception as cleanup_error:
+            cleanup_errors.append(cleanup_error)
+
+        try:
             await self.repository.fail_run(
                 self.run_record,
                 ended_at=ended_at,
@@ -157,7 +207,13 @@ class PersistentAgentRun:
                 error_code=error_code,
                 error_message=error_message,
             )
-            raise
+        except Exception as cleanup_error:
+            cleanup_errors.append(cleanup_error)
+
+        for cleanup_error in cleanup_errors:
+            error.add_note(
+                f"记录 Agent 失败状态时发生 {type(cleanup_error).__name__}: {cleanup_error}"
+            )
 
     async def _record_workflow_task(
         self,
@@ -220,7 +276,7 @@ class PersistentAgentRun:
             if parent_span_id is None:
                 parent_span_id = task_span_ids.get(event.parent_id)
             if parent_span_id is None:
-                raise RuntimeError(f"Trace 操作父节点不存在: {event.parent_id}")
+                raise RuntimeError(f"执行操作的父节点不存在: {event.parent_id}")
             if event.observation_id in operation_span_ids:
                 raise RuntimeError(f"Trace 操作重复开始: {event.observation_id}")
             operation_span_ids[event.observation_id] = await recorder.start_observation(
@@ -260,11 +316,13 @@ class PersistentAgentRun:
         ended_at: datetime,
     ) -> None:
         provenance = _provenance(response.result)
-        marker = provenance.get("marker") or _marker_from_arguments(response.tool.arguments)
+        marker = provenance.get("marker")
+        if marker is None and response.tool is not None:
+            marker = _marker_from_arguments(response.tool.arguments)
         markers = [str(marker)] if marker else []
         sample_count = _nonnegative_int(provenance.get("sample_count"))
         data_sources = [{"filename": item} for item in response.sources]
-        response_data = response.model_dump(mode="json")
+        response_data = response.model_dump(mode="json", exclude_none=True)
 
         await self.repository.complete_run(
             self.run_record,

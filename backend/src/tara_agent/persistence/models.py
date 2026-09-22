@@ -124,9 +124,6 @@ class AgentTrace(TimestampMixin, Base):
     session_id: Mapped[UUID] = mapped_column(
         ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    parent_trace_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("agent_traces.id", ondelete="SET NULL"), nullable=True, index=True
-    )
     correlation_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     workflow_name: Mapped[str] = mapped_column(String(120), nullable=False)
     workflow_version: Mapped[str | None] = mapped_column(String(64), nullable=True)

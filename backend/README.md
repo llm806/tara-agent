@@ -1,15 +1,17 @@
 # Tara Agent backend
 
-The backend keeps HTTP transport, deterministic data access, and domain contracts separate.
+The backend keeps HTTP transport, reproducible data access, and domain contracts separate.
 Source TSV files are immutable inputs; runtime code reads only validated Parquet artifacts.
 
 ```text
 src/tara_agent/
+├── agent/        LangGraph request routing, analysis workflow, prompts, and resource metadata
 ├── api/          FastAPI application and HTTP schemas/routes
-├── analysis/     transport-independent deterministic query services
+├── analysis/     transport-independent query and compute services
 ├── data/         source validation, preprocessing, manifest, and processed-data access
 ├── domain/       transport-independent shared contracts
 ├── mcp/          thin MCP server and tool adapters
+├── observability/ unified Trace contracts, execution context, and recorder
 ├── persistence/  PostgreSQL engine and SQLAlchemy persistence models
 └── config.py     environment-backed configuration
 ```
@@ -28,7 +30,7 @@ The application reads `TARA_DATABASE_URL` from the root `.env` and then `backend
 takes precedence. Alembic is the only supported way to change shared database structure.
 
 Each chat request atomically creates a user message, an assistant placeholder, and one Agent
-trace. Successful and failed executions both persist ordered spans for planning, deterministic
+trace. Successful and failed executions both persist ordered spans for request routing, planning,
 tool execution, and answer generation. Streaming text is buffered in memory and committed at the
 end of the run instead of writing every token to PostgreSQL.
 
@@ -88,7 +90,7 @@ Taxonomy matching defaults to an exact, case-insensitive classification level. L
 matching must be requested explicitly. Results are bounded by pagination and include provenance,
 filter facts, and warnings that sequencing read counts are not cell abundance.
 
-`TaraComputeService` provides the current deterministic calculations:
+`TaraComputeService` provides the current reproducible calculations:
 
 - `taxon_abundance`: raw reads and within-sample relative abundance for one marker and taxon.
 - `diversity_analysis`: observed ASV richness and natural-log Shannon index, optionally restricted
@@ -120,14 +122,32 @@ Each user request creates one Trace and one nested observation tree. Observation
 
 The recorder redacts common credentials and limits the depth, item count, and text size of node inputs and outputs before persistence. Truncated data includes an explicit marker. Full product responses remain in the Trace output so chat restoration does not depend on bounded developer diagnostics. `context_length` is reserved for the model context-window capacity and remains null when that value is unknown.
 
-LangGraph `tasks` stream events drive workflow-node spans. Node code uses the official runtime `task_id` as the exact parent for nested model, MCP tool, deterministic service, and processed-data access observations. The persistent runner does not contain a fixed list of node names, so adding a branch, loop, or node changes the recorded execution order without adding matching lifecycle code to the runner. Internal task and observation events are filtered out of the public chat stream.
+LangGraph `tasks` stream events drive workflow-node spans. Node code uses the official runtime `task_id` as the exact parent for nested model, MCP tool, domain service, and processed-data access observations. The persistent runner does not contain a fixed list of node names, so adding a branch, loop, or node changes the recorded execution order without adding matching lifecycle code to the runner. Internal task and observation events are filtered out of the public chat stream.
 
 ## Agent and chat API
 
 Set `DEEPSEEK_API_KEY` in `backend/.env`; the default model is `deepseek-flash` and the default
-answer reasoning effort is `low`. The Agent uses a fixed LangGraph workflow: plan one call,
-execute one whitelisted MCP tool, then organize the answer. The model never receives source file
-access, Python, or SQL execution capabilities.
+answer reasoning effort is `low`. A request first enters a structured LangGraph routing node.
+The router returns `direct_answer`, `analysis`, `clarify`, or `unsupported`. Only `analysis`
+continues through the current plan-one-tool, execute, and answer path; the other routes do not
+fabricate a tool call. The model never receives source file access, Python, or SQL execution
+capabilities.
+
+For an existing session, the router receives at most the latest eight completed user or assistant
+messages and 6,000 message characters. Completed analyses are ranked using the current question,
+Trace IDs linked by recent messages, recent discussion topics, and recency. A character budget then
+determines how many compact references are offered to the router; there is no fixed three-reference
+behavior. Each reference keeps the prior question, selected tool and arguments, a bounded result
+summary, sources, warnings, and Trace ID; detail rows are not replayed. Planning receives only the
+references the router actually uses. Independent questions select no analysis references, and
+clarification answers use recent messages without creating an artificial relationship between
+Traces. Each Trace remains an independent request record; selected analysis IDs are recorded only
+as execution inputs.
+
+Prompts, the capability profile, the top-level workflow, and current tool contracts have stable
+resource IDs, explicit versions, and content checksums. The root Trace records resources shared by
+the workflow. Routing, planning, and tool nodes record the prompt, capability profile, and tool
+contracts they actually use.
 
 Browser clients authenticate with an opaque server-side session. Passwords use Argon2 hashes;
 only a SHA-256 hash of each random session token is stored in PostgreSQL. The browser receives an
@@ -139,6 +159,8 @@ always scoped to the authenticated owner.
 - `POST /api/v1/auth/guest`: enter the shared development guest space; disabled in production.
 - `POST /api/v1/auth/logout`: revoke the current login session.
 - `GET /api/v1/auth/me`: return the authenticated user.
+- `GET /api/v1/question-suggestions`: return homepage questions supported by the current processed
+  data and registered MCP tools.
 - `POST /api/v1/chat`: complete structured response.
 - `POST /api/v1/chat/stream`: SSE workflow steps, reasoning deltas, and answer deltas followed by
   the complete structured response.

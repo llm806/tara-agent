@@ -37,6 +37,20 @@ class HealthResponse(BaseModel):
     datasets: list[DatasetStatus]
 
 
+class QuestionSuggestionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    category: str
+    question: str
+
+
+class QuestionSuggestionListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[QuestionSuggestionResponse]
+
+
 class PageInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -135,7 +149,6 @@ class TraceSummary(BaseModel):
     id: UUID
     session_id: UUID
     question: str | None = None
-    parent_trace_id: UUID | None
     correlation_id: str | None
     workflow_name: str
     workflow_version: str | None

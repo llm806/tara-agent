@@ -7,6 +7,7 @@ from sqlalchemy import delete, func, select
 
 from tara_agent.config import Settings
 from tara_agent.persistence import AgentTrace, ChatMessage, ChatSession, Database, TraceSpan, User
+from tara_agent.persistence.repositories import AgentRunRepository
 
 pytestmark = pytest.mark.integration
 
@@ -75,6 +76,38 @@ async def _exercise_database() -> None:
                     data_sources=[{"filename": "context_general.tsv"}],
                 )
             )
+            for index in range(5):
+                session.add(
+                    AgentTrace(
+                        session_id=session_id,
+                        workflow_name="analysis-history-test",
+                        status="completed",
+                        model_provider="deepseek",
+                        model_name="deepseek-flash",
+                        output_data={
+                            "question": f"历史分析 {index}",
+                            "answer": "分析完成。",
+                            "tool": {
+                                "name": "find_samples",
+                                "arguments": {"query": {"limit": 1}},
+                            },
+                            "result": {"page": {"total": index + 1}},
+                        },
+                    )
+                )
+
+        repository = AgentRunRepository(database)
+        started = await repository.start_run(
+            user_id=user_id,
+            question="综合历史分析",
+            session_id=session_id,
+            workflow_name="integration-test",
+            workflow_version="1",
+            model_provider="deepseek",
+            model_name="deepseek-flash",
+            model_parameters={},
+        )
+        assert len(started.analysis_traces) == 5
 
         async with database.session() as session:
             trace = await session.get(AgentTrace, trace_id)

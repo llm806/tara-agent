@@ -19,7 +19,6 @@ class FakeTraceRepository:
         self.trace = SimpleNamespace(
             id=uuid4(),
             session_id=session_id,
-            parent_trace_id=None,
             correlation_id=None,
             workflow_name="tara_analysis",
             workflow_version="1",

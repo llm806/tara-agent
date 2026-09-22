@@ -26,11 +26,14 @@ def build_answer_model_input(
     return {
         "question": question,
         "tool_name": tool_name.value,
-        "tool_result": _result_for_model(tool_name, result),
+        "tool_result": build_result_summary(tool_name, result),
     }
 
 
-def _result_for_model(tool_name: ToolName, result: dict[str, Any]) -> dict[str, Any]:
+def build_result_summary(
+    tool_name: ToolName,
+    result: dict[str, Any],
+) -> dict[str, Any]:
     """移除由界面展示的明细，仅保留回答所需的摘要。"""
 
     detail_fields = DETAIL_FIELDS_BY_TOOL.get(tool_name, frozenset())

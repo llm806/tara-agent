@@ -9,52 +9,23 @@ from typing import Any, Protocol
 from openai import AsyncOpenAI, OpenAIError
 
 from tara_agent.agent.context import build_answer_model_input
+from tara_agent.agent.conversation import conversation_context_payload
 from tara_agent.agent.models import (
+    ConversationContext,
     ModelStreamDelta,
     ModelUsage,
+    RouteDecision,
     ToolDefinition,
     ToolPlan,
 )
+from tara_agent.agent.prompts import (
+    ANSWER_SYSTEM_PROMPT,
+    PLANNER_SYSTEM_PROMPT,
+    ROUTER_SYSTEM_PROMPT,
+)
+from tara_agent.agent.resources import CAPABILITY_PROFILE
 from tara_agent.config import Settings
 
-PLANNER_SYSTEM_PROMPT = """
-你是 Tara Agent 的任务规划组件。针对用户提出的 Tara Oceans 问题，从可用的 MCP 工具中
-选择且仅选择一个工具。不得建议执行 Python、SQL、文件系统访问或任何未列出的工具。
-必须调用且仅调用一个已提供的工具，参数必须严格符合该工具的输入结构。
-涉及标记分析时必须明确使用 v4 或 v9。除非用户明确要求子字符串匹配，否则分类学查询
-默认使用层级匹配。不得虚构用户没有提供的样本 ID、标记、分类单元、筛选值或环境变量。
-
-参数规则：
-- 只有用户明确提出某项约束时，才加入对应的可选筛选参数。
-- 保留问题中的学名和准确样本 ID。
-- 将用户给出的中文地名转换为数据集使用的英文名称，例如将“地中海”转换为
-  “Mediterranean”。
-- 用户明确只要一条结果时，将对应的结果数量上限设为 1。
-
-工具选择规则：
-- 仅当用户给出准确样本 ID 时使用 get_sample_info。
-- 用户按地点或环境条件查找、筛选或列出样本时使用 find_samples。
-- 列出匹配的 ASV 或分类学出现情况时使用 find_taxa，不用它计算丰度。
-- 只有查询原始测序读数或相对丰度时使用 taxon_abundance。
-- 只有查询观测 ASV 丰富度或 Shannon 多样性时使用 diversity_analysis。
-- 只有查询与允许使用的某个环境变量之间的相关性时使用 environment_association。
-""".strip()
-
-ANSWER_SYSTEM_PROMPT = """
-你是 Tara Agent。只能依据所提供的已验证工具结果回答用户问题。回答应使用中文，简洁、
-清晰并保持科学审慎。不得虚构结果中不存在的数值、因果关系或分析。V4 与 V9 是相互独立
-的标记，不得直接合并解释。
-
-回答结构：
-1. 先直接回答用户的核心问题。
-2. 再概括支持结论的关键数量、趋势或统计结果。
-3. 只有在会影响结果解释时，才简要说明数据范围、缺失值处理或方法限制。
-
-界面会单独展示图表和结构化结果，因此不得逐条复述样本、ASV、观测值或相关性数据，
-不得列出前若干条记录作为示例，也不得输出原始 JSON。提供给你的工具结果是用于组织回答
-的摘要，完整明细由应用直接展示。若摘要中包含分页信息，只需准确说明查询结果总数，
-不要推断或描述当前页实际展示了多少条明细。
-""".strip()
 
 class AgentModelError(RuntimeError):
     """语言模型返回无法使用的回复时抛出。"""
@@ -64,9 +35,17 @@ class AgentModel(Protocol):
     @property
     def name(self) -> str: ...
 
+    async def route(
+        self,
+        question: str,
+        context: ConversationContext,
+        tools: list[ToolDefinition],
+    ) -> RouteDecision: ...
+
     async def plan(
         self,
         question: str,
+        context: ConversationContext,
         tools: list[ToolDefinition],
     ) -> ToolPlan: ...
 
@@ -105,6 +84,10 @@ class DeepSeekChatModel:
         """返回不含密钥、可用于链路追踪的模型请求配置。"""
 
         return {
+            "router": {
+                "max_tokens": 1_000,
+                "thinking": "disabled",
+            },
             "planner": {
                 "max_tokens": 1_200,
                 "thinking": "disabled",
@@ -116,9 +99,59 @@ class DeepSeekChatModel:
             },
         }
 
+    async def route(
+        self,
+        question: str,
+        context: ConversationContext,
+        tools: list[ToolDefinition],
+    ) -> RouteDecision:
+        user_content = json.dumps(
+            {
+                "question": question,
+                "conversation_context": conversation_context_payload(context),
+                "capability_profile": CAPABILITY_PROFILE,
+                "available_tools": [
+                    {"name": tool.name.value, "description": tool.description}
+                    for tool in tools
+                ],
+            },
+            ensure_ascii=False,
+        )
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.name,
+                messages=[
+                    {"role": "system", "content": ROUTER_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                tools=[
+                    _route_function(
+                        [str(reference.trace_id) for reference in context.analysis_references]
+                    )
+                ],
+                tool_choice="required",
+                max_tokens=1_000,
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+        except OpenAIError as exc:
+            raise AgentModelError("DeepSeek routing request failed") from exc
+
+        tool_calls = response.choices[0].message.tool_calls or []
+        if len(tool_calls) != 1 or tool_calls[0].function.name != "route_request":
+            raise AgentModelError("DeepSeek must return one route_request call")
+        try:
+            values = json.loads(tool_calls[0].function.arguments)
+            decision = RouteDecision.model_validate(values)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise AgentModelError("DeepSeek returned an invalid route decision") from exc
+        return decision.model_copy(
+            update={"usage": _model_usage(getattr(response, "usage", None))}
+        )
+
     async def plan(
         self,
         question: str,
+        context: ConversationContext,
         tools: list[ToolDefinition],
     ) -> ToolPlan:
         function_tools = [
@@ -137,7 +170,16 @@ class DeepSeekChatModel:
                 model=self.name,
                 messages=[
                     {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
-                    {"role": "user", "content": question},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "question": question,
+                                "conversation_context": conversation_context_payload(context),
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
                 ],
                 tools=function_tools,
                 tool_choice="required",
@@ -218,6 +260,66 @@ def _schema_for_model(value: Any) -> Any:
     if isinstance(value, list):
         return [_schema_for_model(item) for item in value]
     return value
+
+
+def _route_function(analysis_reference_ids: list[str]) -> dict[str, Any]:
+    reference_schema: dict[str, Any] = {
+        "type": "array",
+        "items": {"type": "string", "format": "uuid"},
+        "description": "本次请求实际使用的已有分析 trace_id。",
+    }
+    if analysis_reference_ids:
+        reference_schema["items"]["enum"] = analysis_reference_ids
+    else:
+        reference_schema["maxItems"] = 0
+
+    return {
+        "type": "function",
+        "function": {
+            "name": "route_request",
+            "description": "判断当前用户请求应由 Tara Agent 如何处理。",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "direct_answer",
+                            "analysis",
+                            "clarify",
+                            "unsupported",
+                        ],
+                    },
+                    "rationale": {"type": "string", "minLength": 1, "maxLength": 300},
+                    "response": {"type": "string", "maxLength": 2_000},
+                    "capability_requirements": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "sample_query",
+                                "sample_details",
+                                "taxon_query",
+                                "taxon_abundance",
+                                "diversity_analysis",
+                                "environment_association",
+                            ],
+                        },
+                        "maxItems": 10,
+                    },
+                    "analysis_reference_ids": reference_schema,
+                },
+                "required": [
+                    "kind",
+                    "rationale",
+                    "response",
+                    "capability_requirements",
+                    "analysis_reference_ids",
+                ],
+            },
+        },
+    }
 
 
 def _model_usage(value: Any) -> ModelUsage | None:

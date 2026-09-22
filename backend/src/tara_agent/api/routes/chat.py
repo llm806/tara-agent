@@ -38,7 +38,7 @@ def _allow_ephemeral_execution(request: Request) -> bool:
     return request.app.state.settings.environment == "test"
 
 
-@router.post("", response_model=AgentResponse)
+@router.post("", response_model=AgentResponse, response_model_exclude_none=True)
 async def chat(
     payload: ChatRequest,
     request: Request,

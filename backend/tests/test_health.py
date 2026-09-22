@@ -9,6 +9,18 @@ from tara_agent.config import Settings
 from tara_agent.data.preprocess import preprocess
 
 
+class ReadyModel:
+    name = "test-model"
+
+
+class UnavailableDatabase:
+    async def ping(self) -> None:
+        raise OSError("database unavailable")
+
+    async def dispose(self) -> None:
+        pass
+
+
 def _settings(dataset_dir: Path, tmp_path: Path) -> Settings:
     return Settings(
         environment="test",
@@ -33,7 +45,7 @@ def test_health_reports_valid_processed_data(
         settings.processed_data_dir,
         enforce_expected_shape=False,
     )
-    app = create_app(settings)
+    app = create_app(settings, agent_model=ReadyModel())
 
     response = asyncio.run(_get(app, "/api/v1/health"))
 
@@ -41,7 +53,48 @@ def test_health_reports_valid_processed_data(
     payload = response.json()
     assert payload["status"] == "ok"
     assert payload["data_ready"] is True
+    assert payload["agent_ready"] is True
     assert len(payload["datasets"]) == 4
+
+
+def test_readiness_requires_agent(
+    preprocessable_dataset_dir: Path, tmp_path: Path
+) -> None:
+    settings = _settings(preprocessable_dataset_dir, tmp_path)
+    preprocess(
+        preprocessable_dataset_dir,
+        settings.processed_data_dir,
+        enforce_expected_shape=False,
+    )
+    app = create_app(settings)
+
+    response = asyncio.run(_get(app, "/api/v1/ready"))
+
+    assert response.status_code == 503
+    assert response.json()["agent_ready"] is False
+
+
+def test_readiness_checks_database_connection(
+    preprocessable_dataset_dir: Path, tmp_path: Path
+) -> None:
+    settings = _settings(preprocessable_dataset_dir, tmp_path).model_copy(
+        update={"environment": "development"}
+    )
+    preprocess(
+        preprocessable_dataset_dir,
+        settings.processed_data_dir,
+        enforce_expected_shape=False,
+    )
+    app = create_app(
+        settings,
+        agent_model=ReadyModel(),
+        database=UnavailableDatabase(),
+    )
+
+    response = asyncio.run(_get(app, "/api/v1/ready"))
+
+    assert response.status_code == 503
+    assert response.json()["database_ready"] is False
 
 
 def test_readiness_returns_503_when_sources_are_missing(tmp_path: Path) -> None:

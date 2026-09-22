@@ -5,8 +5,6 @@ Tara Agent 是面向 Tara Oceans 数据的分析 Agent：后端提供可验证�
 ## 启动准备
 
 - Docker Desktop、Python 3.12 或 3.13、[uv](https://docs.astral.sh/uv/getting-started/installation/)、Node.js 22 和 pnpm 10（项目指定 pnpm 10.12.4）。
-- 将四份原始 TSV 放在项目根目录的 `Tara_4_Core_Datasets/`。原始文件只读，不提交到 Git。
-- 在 PowerShell 中直接使用 `uv` 命令；无需手动激活 `backend/.venv`，也不要使用 `python -m uv`。
 
 ## 1. 初始化数据库
 

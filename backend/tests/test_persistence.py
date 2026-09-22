@@ -17,6 +17,7 @@ def test_persistence_metadata_contains_auth_and_trace_tables() -> None:
 
 def test_session_sequences_are_unique_and_trace_values_are_checked() -> None:
     messages = Base.metadata.tables["chat_messages"]
+    traces = Base.metadata.tables["agent_traces"]
     spans = Base.metadata.tables["trace_spans"]
 
     message_uniques = {
@@ -31,6 +32,8 @@ def test_session_sequences_are_unique_and_trace_values_are_checked() -> None:
     }
 
     assert "uq_chat_messages_session_sequence" in message_uniques
+    assert "continued_from_trace_id" not in traces.columns
+    assert "parent_trace_id" not in traces.columns
     assert "ck_trace_spans_duration_nonnegative" in span_checks
     assert "ck_trace_spans_total_tokens_nonnegative" in span_checks
 

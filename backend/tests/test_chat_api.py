@@ -53,6 +53,7 @@ async def test_chat_returns_answer_trace_and_chart(chat_app: FastAPI) -> None:
     assert payload["reasoning"] == "先检查工具结果。"
     assert payload["tool"]["name"] == "find_samples"
     assert [step["stage"] for step in payload["steps"]] == [
+        "route",
         "understand",
         "execute",
         "answer",
@@ -74,12 +75,33 @@ async def test_chat_stream_returns_sse_trace(chat_app: FastAPI) -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert response.text.count("event: step") == 3
+    assert response.text.count("event: step") == 4
     assert response.text.count("event: reasoning_delta") == 1
     assert response.text.count("event: answer_delta") == 2
     assert "event: complete" in response.text
     assert '"taxon_abundance"' in response.text
     assert response.text.index("event: answer_delta") < response.text.index("event: complete")
+
+
+@pytest.mark.anyio
+async def test_chat_routes_capability_question_without_analysis_tool(
+    chat_app: FastAPI,
+) -> None:
+    async with AsyncClient(
+        transport=ASGITransport(app=chat_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/api/v1/chat",
+            json={"question": "这个系统能做什么？"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["route"]["kind"] == "direct_answer"
+    assert "tool" not in payload
+    assert payload["result"] == {}
+    assert [step["stage"] for step in payload["steps"]] == ["route", "respond"]
 
 
 @pytest.mark.anyio

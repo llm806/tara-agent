@@ -1,7 +1,9 @@
 "use client";
 
-import { ChevronDown, Database } from "lucide-react";
+import { ChevronDown, Database, Download } from "lucide-react";
 import { type ReactNode, useState } from "react";
+
+import { downloadCsv } from "@/lib/downloads";
 
 type ResultTableProps = {
   result: Record<string, unknown>;
@@ -49,6 +51,17 @@ function ResultTableSection({ label, rows }: Omit<ResultRows, "key">) {
         <ChevronDown size={16} />
       </summary>
       <div className="section-body">
+        <div className="artifact-toolbar">
+          <button
+            type="button"
+            className="artifact-download"
+            onClick={() => downloadCsv(rows, label)}
+            aria-label={`下载${label}表格`}
+          >
+            <Download size={14} aria-hidden="true" />
+            下载 CSV
+          </button>
+        </div>
         <div className="table-scroll">
           <table>
             <thead>
@@ -85,10 +98,22 @@ const resultLists = [
 
 function findTables(result: Record<string, unknown>): ResultRows[] {
   const tables: ResultRows[] = [];
+  const includedKeys = new Set<string>();
   for (const [key, label] of resultLists) {
     const value = result[key];
     if (Array.isArray(value) && value.length > 0 && value.every(isRecord)) {
       tables.push({ key, label, rows: value });
+      includedKeys.add(key);
+    }
+  }
+  for (const [key, value] of Object.entries(result)) {
+    if (
+      !includedKeys.has(key)
+      && Array.isArray(value)
+      && value.length > 0
+      && value.every(isRecord)
+    ) {
+      tables.push({ key, label: humanize(key), rows: value });
     }
   }
   if (isRecord(result.sample)) {

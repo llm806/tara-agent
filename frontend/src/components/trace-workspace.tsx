@@ -547,8 +547,6 @@ function spanKindLabel(kind: string): string {
   if (kind === "tool") return "MCP 工具调用";
   if (kind === "service") return "分析服务";
   if (kind === "data") return "数据访问";
-  if (kind === "skill") return "科研流程";
-  if (kind === "subagent") return "子 Agent";
   return kind;
 }
 function toolLabel(name: string): string {

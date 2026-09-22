@@ -112,7 +112,7 @@ async def _exercise_trace_safety_contract() -> None:
 
     with pytest.raises(ValueError, match="不支持的 Trace 节点类型"):
         await recorder.start_observation("未知节点", "unknown")
-    with pytest.raises(ValueError, match="Trace 父节点不存在"):
+    with pytest.raises(ValueError, match="链路节点的父节点不存在"):
         await recorder.start_observation("孤立节点", "node", parent_span_id=uuid4())
     with pytest.raises(ValueError, match="只能有一个根节点"):
         await recorder.start_observation("第二个根节点", "workflow")

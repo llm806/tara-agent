@@ -5,13 +5,10 @@ import {
   AlertTriangle,
   ArrowUp,
   BrainCircuit,
-  Braces,
   Check,
   ChevronDown,
   Copy,
-  Database,
   FileText,
-  FlaskConical,
   Info,
   LoaderCircle,
   Map as MapIcon,
@@ -26,6 +23,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ResultTable } from "@/components/result-table";
+import { QuestionSuggestions } from "@/components/question-suggestions";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { apiBaseUrl, getSession } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -41,13 +39,6 @@ const AnalysisChart = dynamic(
   () => import("@/components/analysis-chart").then((module) => module.AnalysisChart),
   { ssr: false, loading: () => <div className="analysis-chart chart-loading">正在加载图表…</div> },
 );
-
-const examples = [
-  { label: "样本与环境", question: "找地中海表层且温度至少 20 度的样本", icon: MapIcon },
-  { label: "分类群", question: "V4 中有哪些 Bacillariophyta ASV？", icon: Braces },
-  { label: "多样性", question: "按极地分组比较 V9 的 Shannon 多样性", icon: Database },
-  { label: "环境关联", question: "V4 Bacillariophyta 丰度和温度是否相关？", icon: FlaskConical },
-];
 
 type Run = {
   id: string;
@@ -301,17 +292,7 @@ function EmptyState({ onExample }: { onExample: (question: string) => Promise<vo
     <section className="empty-state">
       <div className="empty-icon"><Waves size={27} aria-hidden="true" /></div>
       <p className="context-label">Tara Agent</p>
-      <div className="example-grid" aria-label="选择一个示例问题">
-        {examples.map((example) => {
-          const Icon = example.icon;
-          return (
-            <button key={example.label} type="button" onClick={() => void onExample(example.question)}>
-              <span className="example-card-label"><Icon size={16} aria-hidden="true" />{example.label}</span>
-              <span className="example-card-question">{example.question}</span>
-            </button>
-          );
-        })}
-      </div>
+      <QuestionSuggestions onSelect={onExample} />
     </section>
   );
 }
@@ -320,6 +301,8 @@ function AnalysisRun({ run }: { run: Run }) {
   const inProgress = !run.historical && !run.response && !run.error;
   const reasoningActive = inProgress && !run.streamedAnswer;
   const answer = run.response?.answer ?? run.streamedAnswer;
+  const analysis = run.response?.route?.kind === "analysis"
+    || run.steps.some((step) => step.stage === "execute" || step.stage === "answer");
 
   return (
     <article className="analysis-run">
@@ -331,12 +314,23 @@ function AnalysisRun({ run }: { run: Run }) {
         <div className="agent-message">
           <div className="response-content">
             {!run.historical || run.response ? (
-              <ProcessPanel steps={run.steps} response={run.response} active={inProgress} />
+              <ProcessPanel
+                steps={run.steps}
+                response={run.response}
+                active={inProgress}
+                analysis={analysis}
+              />
             ) : null}
             {run.streamedReasoning ? (
               <ReasoningPanel reasoning={run.streamedReasoning} active={reasoningActive} />
             ) : null}
-            {answer ? <AnswerPanel answer={answer} active={inProgress} /> : null}
+            {answer ? (
+              <AnswerPanel
+                answer={answer}
+                active={inProgress}
+                analysis={analysis}
+              />
+            ) : null}
             {run.error ? (
               <div className="request-error"><AlertTriangle size={17} />{run.error}</div>
             ) : null}
@@ -428,19 +422,19 @@ type ProcessPanelProps = {
   steps: AgentStep[];
   response?: AgentResponse;
   active: boolean;
+  analysis: boolean;
 };
 
-function ProcessPanel({ steps, response, active }: ProcessPanelProps) {
+function ProcessPanel({ steps, response, active, analysis }: ProcessPanelProps) {
   const serializedArguments = useMemo(
-    () => response ? JSON.stringify(response.tool.arguments, null, 2) : "",
+    () => response?.tool ? JSON.stringify(response.tool.arguments, null, 2) : "",
     [response],
   );
-
   return (
     <DisclosureSection
       className={`process-panel${active ? " active" : ""}`}
       icon={active ? <LoaderCircle className="spin" size={16} /> : <Network size={16} />}
-      title="分析过程"
+      title={analysis ? "分析过程" : "处理过程"}
       meta={active ? "正在进行" : `${steps.length} 个步骤`}
     >
       {steps.length > 0 ? (
@@ -453,7 +447,7 @@ function ProcessPanel({ steps, response, active }: ProcessPanelProps) {
           <span className="progress-dots" aria-hidden="true"><i /><i /><i /></span>
         </p>
       )}
-      {response ? (
+      {response?.tool ? (
         <div className="tool-call">
           <span>调用工具</span><code>{response.tool.name}</code>
           <pre>{serializedArguments}</pre>
@@ -504,12 +498,20 @@ function ReasoningPanel({ reasoning, active }: { reasoning: string; active: bool
   );
 }
 
-function AnswerPanel({ answer, active }: { answer: string; active: boolean }) {
+function AnswerPanel({
+  answer,
+  active,
+  analysis,
+}: {
+  answer: string;
+  active: boolean;
+  analysis: boolean;
+}) {
   return (
     <DisclosureSection
       className="answer-panel"
       icon={<FileText size={16} />}
-      title="分析结论"
+      title={analysis ? "分析结论" : "回答"}
       meta={active ? "正在生成" : "已完成"}
     >
       <div className={active ? "streaming-answer" : undefined}>
@@ -571,12 +573,14 @@ function CompletedArtifacts({
       <footer className="provenance">
         <time dateTime={timestamp}>{formatDateTime(timestamp)}</time>
         <span>模型 {response.model}</span>
-        <span className="source-files">
-          数据来源
-          {response.sources.length > 0
-            ? response.sources.map((source) => <code key={source}>{source}</code>)
-            : "未声明"}
-        </span>
+        {response.tool ? (
+          <span className="source-files">
+            数据来源
+            {response.sources.length > 0
+              ? response.sources.map((source) => <code key={source}>{source}</code>)
+              : "未声明"}
+          </span>
+        ) : null}
       </footer>
     </>
   );

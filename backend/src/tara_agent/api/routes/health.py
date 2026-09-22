@@ -1,16 +1,19 @@
 """存活状态与就绪状态接口。"""
 
 from fastapi import APIRouter, Request, Response, status
+from sqlalchemy.exc import SQLAlchemyError
 
 from tara_agent import __version__
 from tara_agent.api.schemas import DatasetStatus, HealthResponse
 from tara_agent.data.reader import ProcessedDataReader
+from tara_agent.persistence import Database
 
 router = APIRouter(tags=["service"])
 
 
-def _health_response(request: Request) -> HealthResponse:
+async def _health_response(request: Request) -> HealthResponse:
     reader: ProcessedDataReader | None = request.app.state.data_reader
+    database: Database | None = request.app.state.database
     settings = request.app.state.settings
 
     datasets: list[DatasetStatus] = []
@@ -36,9 +39,14 @@ def _health_response(request: Request) -> HealthResponse:
                 )
             )
     data_ready = reader is not None
-    database_ready = request.app.state.database is not None
+    database_ready = await _database_ready(database)
+    agent_ready = request.app.state.agent is not None
     persistence_required = settings.environment != "test"
-    service_ready = data_ready and (database_ready or not persistence_required)
+    service_ready = (
+        data_ready
+        and agent_ready
+        and (database_ready or not persistence_required)
+    )
     return HealthResponse(
         status="ok" if service_ready else "degraded",
         service=settings.app_name,
@@ -46,15 +54,15 @@ def _health_response(request: Request) -> HealthResponse:
         environment=settings.environment,
         data_ready=data_ready,
         database_ready=database_ready,
-        agent_ready=request.app.state.agent is not None,
+        agent_ready=agent_ready,
         model=settings.deepseek_model,
         datasets=datasets,
     )
 
 
 @router.get("/health", response_model=HealthResponse)
-def health(request: Request) -> HealthResponse:
-    return _health_response(request)
+async def health(request: Request) -> HealthResponse:
+    return await _health_response(request)
 
 
 @router.get(
@@ -62,8 +70,18 @@ def health(request: Request) -> HealthResponse:
     response_model=HealthResponse,
     responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": HealthResponse}},
 )
-def ready(request: Request, response: Response) -> HealthResponse:
-    payload = _health_response(request)
+async def ready(request: Request, response: Response) -> HealthResponse:
+    payload = await _health_response(request)
     if payload.status != "ok":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return payload
+
+
+async def _database_ready(database: Database | None) -> bool:
+    if database is None:
+        return False
+    try:
+        await database.ping()
+    except (OSError, SQLAlchemyError):
+        return False
+    return True

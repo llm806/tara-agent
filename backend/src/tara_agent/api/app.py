@@ -10,7 +10,14 @@ from tara_agent import __version__
 from tara_agent.agent import AgentModel, DeepSeekChatModel, TaraAgent
 from tara_agent.agent.gateway import MCPToolGateway
 from tara_agent.agent.runtime import PersistentAgentRunner
-from tara_agent.api.routes import auth_router, chat_router, health_router, history_router
+from tara_agent.agent.suggestions import QuestionSuggestionService
+from tara_agent.api.routes import (
+    auth_router,
+    chat_router,
+    health_router,
+    history_router,
+    suggestions_router,
+)
 from tara_agent.auth import AuthService
 from tara_agent.config import Settings, get_settings
 from tara_agent.data.reader import ProcessedDataError, ProcessedDataReader
@@ -68,13 +75,19 @@ def create_app(
 
     application.state.agent = None
     application.state.persistent_agent = None
+    application.state.question_suggestions = None
     if application.state.data_reader is not None:
+        mcp_server = create_server(application.state.data_reader)
+        gateway = MCPToolGateway(mcp_server)
+        application.state.question_suggestions = QuestionSuggestionService.from_reader(
+            gateway,
+            application.state.data_reader,
+        )
         model = agent_model
         if model is None and runtime_settings.deepseek_api_key is not None:
             model = DeepSeekChatModel(runtime_settings)
         if model is not None:
-            mcp_server = create_server(application.state.data_reader)
-            application.state.agent = TaraAgent(model, MCPToolGateway(mcp_server))
+            application.state.agent = TaraAgent(model, gateway)
             if application.state.run_repository is not None:
                 application.state.persistent_agent = PersistentAgentRunner(
                     application.state.agent,
@@ -94,6 +107,7 @@ def create_app(
     application.include_router(auth_router, prefix=runtime_settings.api_prefix)
     application.include_router(chat_router, prefix=runtime_settings.api_prefix)
     application.include_router(history_router, prefix=runtime_settings.api_prefix)
+    application.include_router(suggestions_router, prefix=runtime_settings.api_prefix)
     return application
 
 

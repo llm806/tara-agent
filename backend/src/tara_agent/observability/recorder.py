@@ -57,7 +57,7 @@ class TraceRecorder:
         except ValueError as error:
             raise ValueError(f"不支持的 Trace 节点类型: {span_kind}") from error
         if parent_span_id is not None and parent_span_id not in self._records:
-            raise ValueError(f"Trace 父节点不存在: {parent_span_id}")
+            raise ValueError(f"链路节点的父节点不存在: {parent_span_id}")
         if parent_span_id is None and self._root_id is not None:
             raise ValueError("一个 Trace 只能有一个根节点")
 
@@ -157,13 +157,20 @@ class TraceRecorder:
             key=lambda record: record.sequence_no,
             reverse=True,
         )
+        first_error: Exception | None = None
         for record in open_records:
-            await self.fail_observation(
-                record.id,
-                error_code=error_code,
-                error_message=error_message,
-                ended_at=end,
-            )
+            try:
+                await self.fail_observation(
+                    record.id,
+                    error_code=error_code,
+                    error_message=error_message,
+                    ended_at=end,
+                )
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        if first_error is not None:
+            raise first_error
 
     def _record(self, observation_id: UUID) -> SpanRecord:
         try:

@@ -2,6 +2,7 @@ import type {
   AuthResponse,
   AuthUser,
   PageInfo,
+  QuestionSuggestionListResponse,
   SessionDetail,
   SessionDeleteResponse,
   SessionListResponse,
@@ -31,6 +32,17 @@ export class ApiError extends Error {
 
 export function getCurrentUser(signal?: AbortSignal): Promise<AuthUser> {
   return requestJson("/api/v1/auth/me", signal);
+}
+
+export function getQuestionSuggestions(
+  excludeIds: string[] = [],
+  signal?: AbortSignal,
+): Promise<QuestionSuggestionListResponse> {
+  const query = new URLSearchParams({ limit: "4" });
+  for (const id of excludeIds) {
+    query.append("exclude_id", id);
+  }
+  return requestJson(`/api/v1/question-suggestions?${query.toString()}`, signal);
 }
 
 export function login(

@@ -12,9 +12,12 @@ from sqlalchemy import delete, func, select
 from tara_agent.persistence.database import Database
 from tara_agent.persistence.models import AgentTrace, ChatMessage, ChatSession, TraceSpan
 
+RECENT_CONTEXT_MESSAGE_LIMIT = 8
+ANALYSIS_HISTORY_SCAN_LIMIT = 100
+
 
 class SessionNotFoundError(LookupError):
-    """请求续接的会话不存在。"""
+    """请求指定的会话不存在。"""
 
 
 class TraceNotFoundError(LookupError):
@@ -26,6 +29,23 @@ class PersistenceStateError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class ContextMessageRecord:
+    """一次执行开始前读取的历史会话消息。"""
+
+    role: str
+    content: str
+    trace_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisTraceRecord:
+    """用于构建多轮分析摘要的已完成 Trace。"""
+
+    trace_id: UUID
+    response_data: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
 class StartedRun:
     """一次已写入数据库、等待 Agent 执行的请求。"""
 
@@ -34,6 +54,8 @@ class StartedRun:
     user_message_id: UUID
     assistant_message_id: UUID
     started_at: datetime
+    context_messages: tuple[ContextMessageRecord, ...] = ()
+    analysis_traces: tuple[AnalysisTraceRecord, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +143,46 @@ class AgentRunRepository:
                 )
             )
             user_sequence = 0 if sequence is None else sequence + 1
+            recent_messages = list(
+                await session.scalars(
+                    select(ChatMessage)
+                    .where(
+                        ChatMessage.session_id == conversation.id,
+                        ChatMessage.status == "completed",
+                        ChatMessage.role.in_(("user", "assistant")),
+                    )
+                    .order_by(ChatMessage.sequence_no.desc(), ChatMessage.id.desc())
+                    .limit(RECENT_CONTEXT_MESSAGE_LIMIT)
+                )
+            )
+            context_messages = tuple(
+                ContextMessageRecord(
+                    role=message.role,
+                    content=message.content,
+                    trace_id=message.trace_id,
+                )
+                for message in reversed(recent_messages)
+                if message.content.strip()
+            )
+            trace_rows = (
+                await session.execute(
+                    select(AgentTrace.id, AgentTrace.output_data)
+                    .where(
+                        AgentTrace.session_id == conversation.id,
+                        AgentTrace.status == "completed",
+                        AgentTrace.output_data.is_not(None),
+                    )
+                    .order_by(AgentTrace.started_at.desc(), AgentTrace.id.desc())
+                    .limit(ANALYSIS_HISTORY_SCAN_LIMIT)
+                )
+            ).all()
+            recent_analyses = [
+                AnalysisTraceRecord(trace_id=trace_id, response_data=dict(output_data))
+                for trace_id, output_data in trace_rows
+                if isinstance(output_data, dict)
+                and isinstance(output_data.get("tool"), dict)
+            ]
+            analysis_traces = tuple(reversed(recent_analyses))
 
             trace = AgentTrace(
                 id=trace_id,
@@ -168,6 +230,8 @@ class AgentRunRepository:
             user_message_id=user_message_id,
             assistant_message_id=assistant_message_id,
             started_at=now,
+            context_messages=context_messages,
+            analysis_traces=analysis_traces,
         )
 
     async def create_span(self, record: SpanRecord) -> None:
@@ -224,7 +288,6 @@ class AgentRunRepository:
                 raise PersistenceStateError("请求对应的持久化记录不完整")
             if trace.status != "running":
                 raise PersistenceStateError(f"链路已经结束：{trace.status}")
-
             trace.status = "completed"
             trace.ended_at = ended_at
             trace.duration_ms = duration_ms

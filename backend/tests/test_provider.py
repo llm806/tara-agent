@@ -3,10 +3,18 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 from typing import Any
+from uuid import UUID, uuid4
 
 import pytest
 
-from tara_agent.agent.models import ToolDefinition, ToolName, ToolPlan
+from tara_agent.agent.models import (
+    AnalysisReference,
+    ConversationContext,
+    ConversationMessage,
+    ToolDefinition,
+    ToolName,
+    ToolPlan,
+)
 from tara_agent.agent.provider import AgentModelError, DeepSeekChatModel
 from tara_agent.config import Settings
 
@@ -94,7 +102,7 @@ async def test_planner_uses_required_function_call_with_mcp_schema() -> None:
         )
     ]
 
-    plan = await model.plan("找一个 Tara 样本", tools)
+    plan = await model.plan("找一个 Tara 样本", ConversationContext(), tools)
 
     assert plan.tool_name is ToolName.FIND_SAMPLES
     assert plan.arguments == {"query": {"limit": 1}}
@@ -122,7 +130,7 @@ async def test_planner_rejects_unusable_function_calls(calls: list[Any]) -> None
     model = model_with(FakeCompletions(calls))
 
     with pytest.raises(AgentModelError):
-        await model.plan("test", [])
+        await model.plan("test", ConversationContext(), [])
 
 
 @pytest.mark.anyio
@@ -178,7 +186,7 @@ async def test_model_usage_is_returned_without_estimation() -> None:
         [tool_call("find_samples", '{"query":{"limit":1}}')],
         usage=usage,
     )
-    plan = await model_with(planner).plan("找一个样本", [])
+    plan = await model_with(planner).plan("找一个样本", ConversationContext(), [])
     assert plan.usage is not None
     assert plan.usage.model_dump() == {
         "input_tokens": 120,
@@ -219,3 +227,125 @@ async def test_answer_rejects_stream_without_content() -> None:
                 {"items": []},
             )
         ]
+
+
+@pytest.mark.anyio
+async def test_router_uses_context_capabilities_and_structured_decision() -> None:
+    reference_id = UUID("5a1f2381-ad65-486c-9003-6e902df8ac76")
+    completions = FakeCompletions(
+        [
+            tool_call(
+                "route_request",
+                json.dumps(
+                    {
+                        "kind": "analysis",
+                        "rationale": "用户在续接样本查询。",
+                        "response": "",
+                        "capability_requirements": ["sample_query"],
+                        "analysis_reference_ids": [
+                            "5a1f2381-ad65-486c-9003-6e902df8ac76"
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        ]
+    )
+    model = model_with(completions)
+    context = ConversationContext(
+        messages=[
+            ConversationMessage(
+                role="user",
+                content="先找地中海样本",
+                trace_id=uuid4(),
+            )
+        ],
+        analysis_references=[
+            AnalysisReference(
+                trace_id=reference_id,
+                question="找地中海样本",
+                answer="找到两个样本。",
+                tool_name="find_samples",
+                tool_arguments={"query": {"ocean_region": "Mediterranean"}},
+                result_summary={"page": {"total": 2}},
+            )
+        ],
+    )
+
+    decision = await model.route("只保留表层的", context, [])
+
+    assert decision.kind == "analysis"
+    assert [str(item) for item in decision.analysis_reference_ids] == [
+        "5a1f2381-ad65-486c-9003-6e902df8ac76"
+    ]
+    user_content = json.loads(completions.request["messages"][1]["content"])
+    assert user_content["conversation_context"]["messages"][0]["content"] == (
+        "先找地中海样本"
+    )
+    assert "trace_id" not in user_content["conversation_context"]["messages"][0]
+    assert user_content["capability_profile"]["product"] == "Tara Agent"
+    assert completions.request["tools"][0]["function"]["name"] == "route_request"
+    reference_schema = completions.request["tools"][0]["function"]["parameters"][
+        "properties"
+    ]["analysis_reference_ids"]
+    assert "maxItems" not in reference_schema
+    assert reference_schema["items"]["enum"] == [str(reference_id)]
+
+
+@pytest.mark.anyio
+async def test_router_disallows_analysis_references_when_context_has_none() -> None:
+    completions = FakeCompletions(
+        [
+            tool_call(
+                "route_request",
+                json.dumps(
+                    {
+                        "kind": "direct_answer",
+                        "rationale": "回答系统能力问题。",
+                        "response": "可以查询样本。",
+                        "capability_requirements": [],
+                        "analysis_reference_ids": [],
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        ]
+    )
+    model = model_with(completions)
+
+    await model.route("能做什么？", ConversationContext(), [])
+
+    reference_schema = completions.request["tools"][0]["function"]["parameters"][
+        "properties"
+    ]["analysis_reference_ids"]
+    assert reference_schema["maxItems"] == 0
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "calls",
+    [
+        [tool_call("unknown_route", "{}")],
+        [tool_call("route_request", "not-json")],
+        [
+            tool_call(
+                "route_request",
+                json.dumps(
+                    {
+                        "kind": "clarify",
+                        "rationale": "缺少条件。",
+                        "response": "",
+                        "capability_requirements": [],
+                        "analysis_reference_ids": [],
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        ],
+    ],
+)
+async def test_router_rejects_invalid_structured_decisions(calls: list[Any]) -> None:
+    model = model_with(FakeCompletions(calls))
+
+    with pytest.raises(AgentModelError):
+        await model.route("test", ConversationContext(), [])

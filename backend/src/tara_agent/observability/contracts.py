@@ -22,8 +22,6 @@ class ObservationKind(StrEnum):
     TOOL = "tool"
     SERVICE = "service"
     DATA = "data"
-    SKILL = "skill"
-    SUBAGENT = "subagent"
 
 
 class ObservationStatus(StrEnum):
