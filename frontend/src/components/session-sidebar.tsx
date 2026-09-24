@@ -279,13 +279,19 @@ export function SessionSidebar({
 
   return (
     <aside className="sidebar">
-      <div className="brand-block">
+      <button
+        className="brand-block"
+        type="button"
+        onClick={onNewSession}
+        disabled={disabled}
+        aria-label="新建对话"
+      >
         <div className="brand-mark" aria-hidden="true"><Waves size={21} /></div>
         <div>
           <strong>Tara Agent</strong>
           <span>海洋数据分析</span>
         </div>
-      </div>
+      </button>
 
       <nav className="primary-nav" aria-label="主要导航">
         <button type="button" onClick={onNewSession} disabled={disabled}>

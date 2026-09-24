@@ -36,13 +36,16 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 .app-shell { display: grid; grid-template-columns: 292px minmax(0, 1fr); min-height: 100vh; }
 .sidebar {
   position: fixed; inset: 0 auto 0 0; display: flex; width: 292px; flex-direction: column;
-  padding: 22px 18px; overflow-y: auto; border-right: 1px solid #32678f;
+  padding: 22px 18px; overflow: hidden; border-right: 1px solid #32678f;
   color: #f4fafb; background: var(--sidebar);
 }
 .brand-block {
-  display: flex; align-items: center; gap: 11px; padding: 2px 4px 25px;
-  border-bottom: 1px solid #3a6f96;
+  display: flex; width: 100%; align-items: center; gap: 11px; padding: 2px 4px 25px;
+  border: 0; border-bottom: 1px solid #3a6f96; color: inherit; background: transparent;
+  cursor: pointer; text-align: left;
 }
+.brand-block:hover:not(:disabled) strong { color: #ffffff; }
+.brand-block:disabled { cursor: not-allowed; opacity: 0.65; }
 .brand-mark, .empty-icon, .agent-avatar, .user-avatar {
   display: grid; flex: 0 0 auto; place-items: center; color: #ffffff; background: var(--accent);
 }
@@ -62,7 +65,14 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   margin: 0; color: var(--faint); font-size: 0.69rem; font-weight: 750;
   letter-spacing: 0;
 }
-.session-history { display: flex; min-height: 0; flex: 1; flex-direction: column; padding: 24px 4px 0; }
+.session-history {
+  display: flex; min-height: 0; flex: 1; flex-direction: column; overflow-y: auto;
+  padding: 24px 4px 12px; scrollbar-width: thin; scrollbar-color: #648dab transparent;
+}
+.session-history::-webkit-scrollbar { width: 6px; }
+.session-history::-webkit-scrollbar-track { background: transparent; }
+.session-history::-webkit-scrollbar-thumb { border-radius: 999px; background: #648dab; }
+.session-history::-webkit-scrollbar-thumb:hover { background: #91b5cb; }
 .session-history .sidebar-label { padding: 0 4px; color: #afc1cf; }
 .session-heading { display: flex; align-items: center; justify-content: space-between; color: #afc1cf; }
 .session-heading > div { display: flex; align-items: center; gap: 8px; }
@@ -155,7 +165,7 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 }
 .sidebar-account {
   display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 9px; align-items: center;
-  margin: 14px 4px 0; padding: 11px 10px; border: 1px solid #4b7898; border-radius: 7px;
+  flex-shrink: 0; margin: 14px 4px 0; padding: 11px 10px; border: 1px solid #4b7898; border-radius: 7px;
   background: #205985;
 }
 .sidebar-account > div { display: grid; gap: 3px; min-width: 0; }
