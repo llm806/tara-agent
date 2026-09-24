@@ -37,6 +37,9 @@ yarn-error.log*
 Tara_4_Core_Datasets/
 backend/data/processed/
 
+# Local reference documents
+*.docx
+
 # IDE / OS
 .idea/
 .vscode/
