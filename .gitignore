@@ -49,9 +49,15 @@ Thumbs.db
 # Keep project plans local; track the project READMEs.
 *.md
 !/README.md
+!/AGENTS.md
 !backend/README.md
 !frontend/README.md
 
 .codex-reference/
 
 backend/trace-test-temp/
+
+# AOCI agent host integration (machine-bound; do not commit)
+.codex/config.toml
+.codex/config.toml.backup.*
+AGENTS.md.backup.*

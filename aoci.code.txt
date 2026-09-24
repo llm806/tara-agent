@@ -1,0 +1,161 @@
+#AOCI-CODE-VOLUME: 1
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/===
+.editorconfig[FC3T]: F:统一仓库文本缩进、编码和换行约定 | R:- | A:EditorConfig：UTF-8、LF、末尾换行；Python 使用四空格 | S:-
+.env.example[FC5T]: F:提供根目录 PostgreSQL 与数据库连接的示例环境变量 | R:code:compose.yaml,code:README.md | A:POSTGRES_DB、POSTGRES_USER、POSTGRES_PASSWORD、POSTGRES_PORT、TARA_DATABASE_URL | S:示例密码必须由部署者替换
+.gitattributes[FV3T]: F:规定 Git 文本文件的 LF 换行及常见图像和列式数据的二进制属性 | R:- | A:Git attributes：文本自动识别并统一 LF；PNG、JPEG、GIF、Parquet、Arrow 标记为 binary | S:-
+.gitignore[FV5T]: F:隔离本地凭据、依赖、缓存、原始与处理后 Tara 数据及机器专属配置 | R:code:.env.example,code:backend/.env.example,code:AGENTS.md | A:Git 忽略规则；保留三份 README、AGENTS.md 与环境变量示例，排除本机 Codex 配置和备份 | S:原始数据目录和处理后产物不得提交；方案类 Markdown 默认不纳入 Git
+README.md[SG6T]: F:说明项目用途、本地配置、首次初始化和前后端启动步骤 | R:code:compose.yaml,code:backend/README.md,code:frontend/README.md | A:面向开发者的 PowerShell 初始化及运行命令 | S:根目录 .env 是本地配置入口，数据库密码与连接串需保持一致
+compose.yaml[RI7T]: F:定义本地PostgreSQL容器、持久卷和健康检查 | R:code:backend/src/tara_agent/config.py,code:backend/src/tara_agent/persistence/database.py | A:端口绑定本机回环地址并从环境读取数据库凭据 | S:数据库数据写入持久卷；健康检查供启动流程使用
+AGENTS.md[SG8S]: F:规定 Tara Agent 的架构边界、科研数据与工作流原则、验证要求及 AOCI 认知流程 | R:code:.gitignore | A:Codex 仓库级开发指引；要求设计前阅读方案文档，按分层职责实现并维护统一 Trace 与 AOCI 索引 | S:新运行缺少可靠完整认知时须通过 AOCI 规则和 Overview 加载；受管理对象稳定后增量维护；LLM 不得直接执行任意 Python、Shell 或 SQL
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/===
+.env.example[FC6T]: F:列出后端运行、数据目录、数据库池、认证和 DeepSeek 的环境配置 | R:code:backend/src/tara_agent/config.py | A:TARA_ 前缀配置、DEEPSEEK_API_KEY 示例 | S:示例密钥和密码必须替换；生产配置由环境提供
+.python-version[FV2T]: F:指定后端开发环境使用的 Python 3.12 版本 | R:code:backend/pyproject.toml | A:uv 与版本管理工具读取的版本文件 | S:-
+README.md[SB7S]: F:说明后端分层、迁移、预处理、测试和可复现数据访问的开发契约 | R:code:backend/src/tara_agent/data/preprocess.py,code:backend/src/tara_agent/data/reader.py,code:backend/migrations/env.py | A:后端初始化、迁移、tara-data 与测试命令 | S:原始 TSV 保持只读；运行时只读取经过校验的 Parquet 产物
+alembic.ini[FC5T]: F:配置 Alembic 迁移脚本位置、Python 搜索路径和日志输出 | R:code:backend/migrations/env.py | A:alembic 的 script_location、prepend_sys_path 和日志设置 | S:-
+pyproject.toml[FV8T]: F:声明后端 Python 包、运行与开发依赖、命令入口及测试格式配置 | R:code:backend/src/tara_agent/api/app.py,code:backend/src/tara_agent/data/cli.py,code:backend/src/tara_agent/mcp/server.py | A:tara-data、tara-mcp 脚本；FastAPI、pytest、Ruff、uv 配置 | S:Python 要求 >=3.12,<3.14；DuckDB 仅属于开发依赖
+uv.lock[FV5L]: F:锁定后端Python依赖版本、分发地址和校验摘要以复现安装 | R:code:backend/pyproject.toml | A:由依赖管理工具按pyproject解析生成 | S:生成文件不手工编辑
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/benchmarks/===
+__init__.py[TP2T]: F:标识独立于运行时的开发基准测试包 | R:code:backend/benchmarks/query_formats.py | A:Python 包入口 | S:-
+query_formats.py[TP5S]: F:比较同一 Tara 分类查询在原始 TSV、Polars Parquet 和 DuckDB Parquet 上的结果与耗时 | R:code:backend/src/tara_agent/data/reader.py,code:backend/src/tara_agent/data/preprocess.py | A:命令行 JSON 基准报告；查询结果不一致时抛出 BenchmarkError | S:只用于开发性能评估，DuckDB 不属于运行时依赖
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/migrations/===
+README[SV5T]: F:规定数据库迁移按版本追加及共享环境的修改边界 | R:code:backend/migrations/env.py | A:Alembic 迁移目录说明 | S:共享环境执行过的迁移不可修改，应新增迁移
+env.py[PV7T]: F:连接后端环境配置与 SQLAlchemy 模型，运行在线或离线 Alembic 迁移 | R:code:backend/src/tara_agent/config.py,code:backend/src/tara_agent/persistence/models.py | A:run_migrations_online、run_migrations_offline | S:数据库连接从 Settings 获取，不在 Alembic 配置中写凭据；在线迁移使用异步引擎
+script.py.mako[PV4T]: F:定义新 Alembic 修订脚本的版本字段与升级回退函数模板 | R:code:backend/migrations/env.py | A:revision、down_revision、upgrade、downgrade 模板 | S:-
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/migrations/versions/===
+20260917_01_create_persistence_tables.py[PD8M]: F:建立会话、消息、Agent Trace 和嵌套 Span 的首版 PostgreSQL 结构 | R:code:backend/src/tara_agent/persistence/models.py | A:迁移 20260917_01；创建 chat_sessions、chat_messages、agent_traces、trace_spans | S:消息序号在会话内唯一，Span 序号在 Trace 内唯一；删除会话级联删除关联链路
+20260917_02_add_authentication.py[PI7T]: F:新增用户和登录会话，并为聊天会话建立用户所有权外键 | R:code:backend/migrations/versions/20260917_01_create_persistence_tables.py,code:backend/src/tara_agent/persistence/models.py | A:迁移 20260917_02；users、auth_sessions 及所有权约束 | S:登录令牌只保存哈希，用户删除级联删除登录会话和聊天会话
+20260917_03_narrow_session_user_id.py[PI4T]: F:将聊天会话的所有者字段长度调整为与用户主键一致 | R:code:backend/migrations/versions/20260917_02_add_authentication.py | A:迁移 20260917_03；chat_sessions.user_id 长度 255 改为 36 | S:-
+20260918_04_add_guest_account_flag.py[PI4T]: F:为用户增加区分共享游客账户的布尔字段 | R:code:backend/migrations/versions/20260917_02_add_authentication.py | A:迁移 20260918_04；users.is_guest 非空且默认为 false | S:-
+20260918_05_add_session_pinning.py[PU4T]: F:为聊天会话添加可为空的置顶时间字段 | R:code:backend/migrations/versions/20260917_01_create_persistence_tables.py | A:迁移 20260918_05；chat_sessions.pinned_at | S:-
+20260921_06_rename_trace_continuation.py[PO6S]: F:将 Trace 间原有父级字段和历史 JSON 属性改名为续接语义 | R:code:backend/migrations/versions/20260917_01_create_persistence_tables.py,code:backend/migrations/versions/20260922_07_drop_trace_continuation.py | A:迁移 20260921_06；continued_from_trace_id 与相关索引、外键及 JSON 路径 | S:该迁移只记录历史过渡；后续迁移会删除线性续接字段
+20260922_07_drop_trace_continuation.py[PO7T]: F:删除 Trace 间线性续接字段并清理历史路由输出属性 | R:code:backend/migrations/versions/20260921_06_rename_trace_continuation.py | A:迁移 20260922_07；删除 continued_from_trace_id 外键、索引与列 | S:降级只重建空列，已删除的关系数据无法恢复
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/===
+__init__.py[CG3T]: F:声明 Tara Agent 后端包版本 | R:- | A:__version__=0.1.0 | S:-
+config.py[FC9T]: F:从环境变量及本地 env 文件读取并校验 API、数据、数据库、认证和模型配置 | R:code:backend/.env.example,code:backend/src/tara_agent/api/app.py | A:Settings、get_settings、get_database_url | S:派生数据目录不得位于原始数据目录内；生产环境认证 Cookie 仅通过 HTTPS 发送
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/agent/===
+__init__.py[EA5T]: F:导出 Agent 工作流、响应模型和模型适配接口 | R:code:backend/src/tara_agent/agent/graph.py,code:backend/src/tara_agent/agent/provider.py | A:TaraAgent、AgentResponse、AgentModel、DeepSeekChatModel | S:-
+charts.py[AU6T]: F:把已验证工具结果转换为地图、柱状图或散点图的结构化图表数据 | R:code:backend/src/tara_agent/agent/models.py,code:backend/src/tara_agent/agent/graph.py | A:build_charts(tool_name,result) 返回 ChartSpec 列表 | S:图表只使用已有结果；无适用或无可绘制数据时返回空列表
+context.py[AA7T]: F:为回答模型压缩工具结果，移除界面展示的明细并保留摘要 | R:code:backend/src/tara_agent/agent/models.py,code:backend/src/tara_agent/agent/provider.py | A:build_answer_model_input、build_result_summary | S:分页只传总数；长字符串及列表截断仅用于模型上下文，不改变结构化 API 结果
+conversation.py[AW8M]: F:筛选近期消息及相关历史分析摘要，构造路由与规划使用的有限上下文 | R:code:backend/src/tara_agent/agent/context.py,code:backend/src/tara_agent/agent/models.py | A:build_conversation_context、select_analysis_references、planning_context | S:最多保留八条消息和字符预算；规划仅接收路由实际选中的引用
+gateway.py[IE8T]: F:通过内存 MCP 客户端向 Agent 暴露六个白名单 Tara 工具 | R:code:backend/src/tara_agent/mcp/server.py,code:backend/src/tara_agent/agent/models.py | A:MCPToolGateway.list_tools、call | S:不允许调用枚举以外工具；工具错误或缺失结构化结果均抛 AgentToolError
+graph.py[AW9L]: F:编排请求路由、受限分析或直接回应的 LangGraph 工作流并发出流式事件 | R:code:backend/src/tara_agent/agent/provider.py,code:backend/src/tara_agent/agent/gateway.py,code:backend/src/tara_agent/observability/execution.py | A:TaraAgent.run、stream、stream_execution；路由、理解、执行、回答节点 | S:只有 analysis 路由调用工具；每次分析当前只规划一个白名单工具；节点 Trace 使用实际 task_id
+models.py[CA8S]: F:定义并校验 Agent 路由、工具计划、会话上下文、图表和流式响应契约 | R:code:backend/src/tara_agent/agent/graph.py,code:backend/src/tara_agent/agent/provider.py | A:ToolName、RouteDecision、ToolPlan、AgentResponse、AgentStreamEvent | S:非分析路由必须有用户回复；分析路由不得携带直接回复
+prompts.py[SA8T]: F:保存请求路由、单工具规划和科学回答使用的中文系统提示词 | R:code:backend/src/tara_agent/agent/provider.py,code:backend/src/tara_agent/agent/resources.py | A:ROUTER_SYSTEM_PROMPT、PLANNER_SYSTEM_PROMPT、ANSWER_SYSTEM_PROMPT | S:模型不得虚构数据或执行任意 Python、SQL；V4 与 V9 不合并解释
+provider.py[IA9M]: F:将 DeepSeek Chat Completions 适配为路由、单工具规划和流式回答接口 | R:code:backend/src/tara_agent/agent/prompts.py,code:backend/src/tara_agent/agent/models.py,code:backend/src/tara_agent/config.py | A:AgentModel 协议、DeepSeekChatModel | S:路由必须返回一个 route_request，规划必须恰好选择一个工具；密钥不进入 Trace 参数
+resources.py[AO7T]: F:为提示词、能力说明、工作流和工具定义生成可追溯的版本与校验和 | R:code:backend/src/tara_agent/agent/prompts.py,code:backend/src/tara_agent/agent/models.py | A:AgentResource.trace_data、tool_resources、CAPABILITY_PROFILE | S:Trace 资源快照以内容 SHA-256 标识实际使用版本，不把候选资源冒充执行依赖
+runtime.py[AW9M]: F:将 Agent 流式执行落入持久化会话、消息和统一 Trace 树 | R:code:backend/src/tara_agent/agent/graph.py,code:backend/src/tara_agent/observability/recorder.py,code:backend/src/tara_agent/persistence/repositories.py | A:PersistentAgentRunner、PersistentAgentRun.stream | S:成功与失败均记录运行和节点状态；会话恢复使用完整业务回复而非可能截断的节点调试输出
+workflow.py[AO7T]: F:定义 LangGraph 节点生命周期事件并绑定真实任务 Trace 上下文 | R:code:backend/src/tara_agent/observability/execution.py,code:backend/src/tara_agent/agent/graph.py | A:WorkflowNodeDefinition、WorkflowTaskEvent、bind_workflow_trace | S:内部 task 事件不进入面向用户的聊天流
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/agent/suggestions/===
+__init__.py[EU3T]: F:导出问题建议数据结构与服务 | R:code:backend/src/tara_agent/agent/suggestions/models.py,code:backend/src/tara_agent/agent/suggestions/service.py | A:QuestionSuggestion、QuestionSuggestionService | S:-
+catalog.py[DU6S]: F:根据真实数据特征构造样本、分类、丰度、多样性和环境关联的候选问题 | R:code:backend/src/tara_agent/agent/suggestions/models.py,code:backend/src/tara_agent/agent/suggestions/profile.py | A:build_question_catalog(SuggestionProfile) | S:问题携带所需数据集与工具标识；不在目录中虚构样本或分类群
+models.py[CU5T]: F:定义问题建议、样本筛选组合和数据特征的不可变结构 | R:code:backend/src/tara_agent/agent/suggestions/catalog.py,code:backend/src/tara_agent/agent/suggestions/profile.py | A:QuestionSuggestion、SampleFilter、SuggestionProfile | S:-
+profile.py[DA7S]: F:从处理后数据提取真实样本筛选值、环境变量和常见分类群 | R:code:backend/src/tara_agent/data/reader.py,code:backend/src/tara_agent/agent/suggestions/models.py | A:read_suggestion_profile(ProcessedDataReader) | S:仅推荐数据中存在且满足基本可用性条件的值；按 marker 分别选择分类群
+service.py[AU7T]: F:在数据集和 MCP 工具共同可用的候选问题中按类别均衡抽样 | R:code:backend/src/tara_agent/agent/suggestions/catalog.py,code:backend/src/tara_agent/agent/gateway.py | A:QuestionSuggestionService.from_reader、get_batch | S:先排除已展示问题；不足指定数量时回退完整可执行候选池
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/analysis/===
+__init__.py[EB5T]: F:导出与传输层无关的 Tara 查询、计算和输入输出契约 | R:code:backend/src/tara_agent/analysis/service.py,code:backend/src/tara_agent/analysis/compute.py | A:TaraQueryService、TaraComputeService 及各类 Query | S:-
+compute.py[KA9L]: F:计算分类群丰度、未稀释 Alpha 多样性与环境变量 Spearman 关联 | R:code:backend/src/tara_agent/data/reader.py,code:backend/src/tara_agent/analysis/compute_models.py,code:backend/src/tara_agent/analysis/taxonomy.py | A:TaraComputeService.taxon_abundance、diversity_analysis、environment_association | S:按 marker 限定样本；缺失环境值不参与成对相关；零读数样本的 Shannon 未定义并给出警告
+compute_models.py[CA8S]: F:校验丰度、多样性和环境关联计算的输入范围与结果结构 | R:code:backend/src/tara_agent/analysis/compute.py,code:backend/src/tara_agent/domain/contracts.py | A:TaxonAbundanceQuery、DiversityQuery、EnvironmentAssociationQuery、EnvironmentVariable | S:样本 ID 不允许空值或重复；相关计算使用明确枚举的环境变量
+models.py[CA8S]: F:定义并校验样本与分类群查询的分页、筛选和结果契约 | R:code:backend/src/tara_agent/analysis/service.py,code:backend/src/tara_agent/domain/contracts.py | A:FindSamplesQuery、FindTaxaQuery、SampleContext、TaxonMatchMode | S:表层别名统一为 SRF；温度下限不得超过上限
+service.py[DA9M]: F:从已校验的处理后数据查询样本背景及分类群出现情况 | R:code:backend/src/tara_agent/data/reader.py,code:backend/src/tara_agent/analysis/models.py,code:backend/src/tara_agent/analysis/taxonomy.py | A:TaraQueryService.find_samples、get_sample_info、find_taxa | S:分类群测序 read count 不可直接解释为细胞丰度；结果附筛选条件与数据来源
+taxonomy.py[DA7T]: F:为查询与计算统一构造分类学层级或字面子串匹配表达式 | R:code:backend/src/tara_agent/analysis/models.py,code:backend/src/tara_agent/analysis/service.py,code:backend/src/tara_agent/analysis/compute.py | A:taxonomy_predicate(taxon,match_mode) | S:层级匹配按分号分割后比较；两种模式均不区分大小写
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/api/===
+__init__.py[EN2T]: F:标识 Tara Agent HTTP API 包 | R:- | A:Python 包入口 | S:-
+app.py[EN9S]: F:装配 FastAPI、数据库、认证、处理后数据、MCP、Agent 和路由 | R:code:backend/src/tara_agent/config.py,code:backend/src/tara_agent/data/reader.py,code:backend/src/tara_agent/agent/graph.py | A:create_app、app；注册 health、auth、chat、history、suggestions 路由 | S:缺少处理后数据或模型配置时相应能力不可用；启动与关闭时管理数据库连接
+dependencies.py[MS8T]: F:统一解析当前用户并校验有状态请求的来源 | R:code:backend/src/tara_agent/auth/service.py,code:backend/src/tara_agent/api/routes/chat.py | A:require_current_user、validate_request_origin、CurrentUserDependency | S:认证 Cookie 无效返回 401；非可信 Origin 的写请求返回 403；仅测试环境允许替代用户
+schemas.py[CN8S]: F:定义健康、问题推荐、会话、消息及 Trace 查询的 HTTP 数据结构 | R:code:backend/src/tara_agent/api/routes/history.py,code:backend/src/tara_agent/api/routes/health.py | A:HealthResponse、SessionDetail、TraceDetail、TraceSpanResponse | S:更新会话至少提供一项变更；分页和标识字段进行范围校验
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/api/routes/===
+__init__.py[EN4T]: F:集中导出应用装配所需的 FastAPI 路由 | R:code:backend/src/tara_agent/api/app.py | A:auth_router、chat_router、health_router、history_router、suggestions_router | S:-
+auth.py[EI8S]: F:提供注册、登录、访客登录、退出和当前用户 HTTP 接口 | R:code:backend/src/tara_agent/auth/service.py,code:backend/src/tara_agent/api/dependencies.py | A:/auth/register、/auth/login、/auth/guest、/auth/logout、/auth/me | S:登录会话使用 HttpOnly Cookie；生产环境或禁用配置下拒绝游客登录
+chat.py[EB9S]: F:提供同步聊天与 SSE 流式 Agent 执行接口并转换错误状态 | R:code:backend/src/tara_agent/agent/runtime.py,code:backend/src/tara_agent/api/dependencies.py | A:POST /chat、POST /chat/stream；AgentStreamEvent SSE | S:非测试环境必须使用持久化运行器；会话所有权和数据库错误按 HTTP 契约返回
+health.py[ER7T]: F:报告数据、数据库和 Agent 的存活及就绪状态 | R:code:backend/src/tara_agent/data/reader.py,code:backend/src/tara_agent/persistence/database.py | A:GET /health、GET /ready | S:就绪不足返回 503；非测试环境要求数据库可用
+history.py[EO8M]: F:提供用户会话、消息和 Trace 树的列表、详情、更新及删除接口 | R:code:backend/src/tara_agent/persistence/repositories.py,code:backend/src/tara_agent/api/schemas.py | A:/sessions、/traces 及会话内 Trace 路由 | S:所有历史读取与变更都传入当前用户 ID，以仓储层实施隔离
+suggestions.py[EU7T]: F:返回当前数据与工具都支持的首页问题建议 | R:code:backend/src/tara_agent/agent/suggestions/service.py | A:GET /question-suggestions；limit 与 exclude_id 参数 | S:处理后数据不可用时返回 503；结果需要当前用户认证
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/auth/===
+__init__.py[EI4T]: F:导出用户认证服务、最小用户身份及认证错误类型 | R:code:backend/src/tara_agent/auth/service.py | A:AuthService、CurrentUser、认证异常 | S:-
+service.py[DI9S]: F:使用 Argon2 密码和服务端令牌哈希实现用户注册、登录、访客身份与会话认证 | R:code:backend/src/tara_agent/persistence/models.py,code:backend/src/tara_agent/persistence/database.py | A:AuthService.register、login、login_guest、authenticate、logout | S:数据库只保存令牌哈希；游客邮箱被普通用户占用时拒绝复用；停用账户不能登录
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/data/===
+__init__.py[ED3T]: F:导出 Tara 数据目录接口 | R:code:backend/src/tara_agent/data/catalog.py | A:DatasetCatalog | S:-
+catalog.py[DD7S]: F:验证四类原始Tara TSV的数据集存在性、表头、必需列和样本列唯一性，不加载完整丰度矩阵 | R:code:backend/src/tara_agent/data/preprocess.py,code:backend/src/tara_agent/data/reader.py | A:DatasetCatalog.inspect提供预处理前的数据目录检查结果 | S:四类文件是当前接入范围，不是数据系统固定上限
+cli.py[DI4T]: F:提供tara-data预处理命令入口并输出处理状态、清单和指标的JSON | R:code:backend/src/tara_agent/data/preprocess.py,code:backend/src/tara_agent/config.py | A:命令接受force并通过Settings定位数据目录 | S:失败返回非零退出状态
+manifest.py[DD7S]: F:定义源文件、派生产物、覆盖率和处理指标的版本化数据清单及读写接口 | R:code:backend/src/tara_agent/data/preprocess.py,code:backend/src/tara_agent/data/reader.py | A:DataManifest记录源及产物哈希、覆盖率、生成版本和指标 | S:旧benchmark_report可读取但不进入新清单输出
+preprocess.py[DD9L]: F:校验四类原始数据并将上下文和标记基因丰度转换为可复现Parquet派生产物 | R:code:backend/src/tara_agent/data/catalog.py,code:backend/src/tara_agent/data/manifest.py,code:backend/src/tara_agent/data/reader.py | A:preprocess生成带源文件哈希、版本和覆盖率的清单并原子发布处理代 | S:原始数据只读；源与派生目录隔离，样本映射及预期规模验证后才发布
+reader.py[DD8S]: F:根据已验证清单读取派生Parquet并提供样本、环境和丰度查询所需数据 | R:code:backend/src/tara_agent/data/manifest.py,code:backend/src/tara_agent/analysis/query.py,code:backend/src/tara_agent/observability/execution.py | A:ProcessedDataReader验证产物路径与大小，扫描所需列并记录数据访问来源 | S:拒绝越界产物路径；查询不直接读取原始TSV
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/domain/===
+__init__.py[DE2T]: F:集中导出领域标记、数据来源、结果元信息和警告类型 | R:code:backend/src/tara_agent/domain/contracts.py | A:为其他层提供领域契约导入入口 | S:-
+contracts.py[DE7T]: F:定义V4/V9标记、分析结果来源元信息及结构化警告的领域模型 | R:code:backend/src/tara_agent/analysis/models.py,code:backend/src/tara_agent/mcp/tools.py | A:结果元信息包含数据集、样本量、筛选条件和标记 | S:V4与V9是独立标记，不能混作同一丰度范围
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/mcp/===
+__init__.py[EM2T]: F:导出MCP服务器创建函数 | R:code:backend/src/tara_agent/mcp/server.py | A:供服务入口构建MCP实例 | S:-
+server.py[EM6T]: F:配置并启动stdio MCP服务，绑定处理数据读取器及查询和计算服务 | R:code:backend/src/tara_agent/mcp/tools.py,code:backend/src/tara_agent/data/reader.py | A:create_server注册Tara工具，main以stdio提供服务 | S:工具说明要求显式选择V4或V9标记
+tools.py[EM8S]: F:将六种只读Tara查询与分析能力暴露为有参数及结果Schema的MCP工具 | R:code:backend/src/tara_agent/analysis/query.py,code:backend/src/tara_agent/analysis/compute.py,code:backend/src/tara_agent/observability/execution.py | A:工具覆盖样本检索、样本信息、分类单元、丰度、多样性和环境关联 | S:薄层调用分析服务；仅将未找到与参数错误转为ToolError
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/observability/===
+__init__.py[EO1T]: F:标记统一观测模块的包入口 | R:code:backend/src/tara_agent/observability/recorder.py | A:支持执行观测模块导入 | S:-
+contracts.py[EO8M]: F:定义工作流、节点、模型、工具、服务及数据访问观测事件和输入清洗契约 | R:code:backend/src/tara_agent/observability/execution.py,code:backend/src/tara_agent/observability/recorder.py | A:ObservationUpdate及TraceDataLimits约束状态和持久化字段 | S:输入入库前需遮盖密钥并限制深度、集合长度及字符串大小
+execution.py[EO8S]: F:用上下文变量传播执行Trace并将嵌套观测作用域转为开始、完成或失败事件 | R:code:backend/src/tara_agent/observability/recorder.py,code:backend/src/tara_agent/agent/graph.py | A:bind_execution_trace与ObservationScope保留真实父节点身份 | S:无绑定Trace时观测调用为空操作；LangGraph任务父子关系须显式继承
+recorder.py[EO9M]: F:将执行事件写成单根、真实父子关系的统一Trace树并维护节点生命周期 | R:code:backend/src/tara_agent/observability/contracts.py,code:backend/src/tara_agent/persistence/repositories.py | A:TraceRecorder通过仓储协议创建、更新、完成和失败Span | S:仅允许一个根且父节点必须已存在；失败时逆序关闭未完成Span
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/src/tara_agent/persistence/===
+__init__.py[DP3T]: F:集中导出数据库会话、ORM模型和持久化入口 | R:code:backend/src/tara_agent/persistence/database.py,code:backend/src/tara_agent/persistence/models.py | A:供API和Agent层使用持久化类型 | S:-
+database.py[DP7T]: F:根据配置创建异步SQLAlchemy引擎及事务会话并提供连通性和关闭操作 | R:code:backend/src/tara_agent/config.py,code:backend/src/tara_agent/persistence/models.py | A:会话上下文成功时提交、异常时回滚 | S:数据库连接由配置提供
+models.py[DP9M]: F:定义用户、认证会话、对话、消息、Agent Trace及嵌套Span的PostgreSQL结构 | R:code:backend/src/tara_agent/persistence/repositories.py,code:backend/alembic/versions/0001_initial.py | A:用户归属、唯一序列及JSONB字段构成链路持久化约束 | S:会话令牌只存哈希；一个问题对应一个Trace及其Span树
+repositories.py[DP9L]: F:以用户作用域管理对话、运行消息和Trace Span的创建、读取与完成失败流转 | R:code:backend/src/tara_agent/persistence/models.py,code:backend/src/tara_agent/observability/recorder.py,code:backend/src/tara_agent/agent/service.py | A:AgentRunRepository以短事务启动运行并写入用户消息、助手占位和Trace | S:读取及更新必须检查user_id；历史只纳入已完成消息，已有会话启动需加锁
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/frontend/===
+.env.example[CI3T]: F:给出前端可选API基址的环境变量示例 | R:code:frontend/src/lib/api.ts | A:NEXT_PUBLIC_API_BASE_URL可留空以使用页面同源代理 | S:变量公开给浏览器，不应放入密钥
+README.md[CZ4T]: F:说明前端本地启动步骤和交互展示职责 | R:code:frontend/package.json,code:frontend/src/components/chat-workspace.tsx | A:记录健康检查、流式问答、链路和图表展示 | S:统计计算由后端完成
+eslint.config.mjs[FC3T]: F:配置Next与TypeScript的ESLint规则并忽略构建产物 | R:code:frontend/package.json | A:供pnpm lint使用 | S:-
+next.config.ts[FI6T]: F:配置Next开发来源及API路径重写到本机后端 | R:code:frontend/src/lib/api.ts,code:frontend/src/components/chat-workspace.tsx | A:/api/:path*转发至127.0.0.1:8000/api/:path* | S:代理目标是本地开发后端；允许的开发来源含指定ngrok主机
+package.json[FC6T]: F:声明前端脚本和Next、React、Plotly等直接依赖版本 | R:code:frontend/pnpm-lock.yaml,code:frontend/next.config.ts | A:提供dev、build、start、lint和typecheck命令 | S:使用pnpm 10.12.4及锁文件保持安装可复现
+pnpm-lock.yaml[FV5L]: F:锁定前端直接和传递依赖的完整解析版本与完整性摘要 | R:code:frontend/package.json | A:pnpm安装依据此锁文件复现依赖树 | S:生成文件应由pnpm维护
+tsconfig.json[FC5T]: F:配置前端严格TypeScript检查、Next插件和@别名到src目录 | R:code:frontend/package.json,code:frontend/src/lib/types.ts | A:构建生成类型与源码一起检查且不输出JS | S:排除node_modules并启用增量检查
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/frontend/public/plotly-topojson/===
+world_110m.json[FD4T]: F:提供Plotly地理散点图所需的世界海岸线TopoJSON静态资源 | R:code:frontend/src/components/analysis-chart.tsx | A:Plotly通过/plotly-topojson/加载world_110m.json | S:数据是渲染底图资源，不是Tara科学样本数据
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/frontend/src/app/===
+globals.css[FU8L]: F:定义聊天、侧栏、分析产物、链路树和认证页面的全局主题及响应布局 | R:code:frontend/src/app/layout.tsx,code:frontend/src/components/chat-workspace.tsx,code:frontend/src/components/session-sidebar.tsx,code:frontend/src/components/trace-workspace.tsx | A:颜色变量、响应式断点与桌面侧栏内的会话记录滚动分区及其滚动条配色 | S:桌面侧栏的长会话列表须在账户卡片上方独立滚动，避免内容溢出覆盖账户操作；样式不承载科学计算
+layout.tsx[FU5T]: F:设置中文页面元信息、全局样式并用AuthGate包裹全部路由 | R:code:frontend/src/components/auth-gate.tsx,code:frontend/src/app/globals.css | A:RootLayout提供应用级认证边界 | S:-
+page.tsx[FU3T]: F:将首页路由交给聊天分析工作区 | R:code:frontend/src/components/chat-workspace.tsx | A:/呈现ChatWorkspace | S:-
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/frontend/src/app/sessions/[sessionId]/traces/[traceId]/===
+page.tsx[FU4T]: F:将会话与链路ID传给链路工作区呈现指定Trace | R:code:frontend/src/components/trace-workspace.tsx | A:/sessions/[sessionId]/traces/[traceId]为详情路由 | S:-
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/frontend/src/app/sessions/[sessionId]/traces/===
+page.tsx[FU4T]: F:将会话ID传给链路工作区展示该会话的Trace列表 | R:code:frontend/src/components/trace-workspace.tsx | A:/sessions/[sessionId]/traces为会话链路入口 | S:-
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/frontend/src/app/traces/===
+page.tsx[FU5T]: F:兼容旧链路入口并重定向至带会话ID的正式路由 | R:code:frontend/src/components/legacy-trace-redirect.tsx | A:优先使用session_id直接跳转；只有trace_id时先查询所属会话 | S:-
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/frontend/src/components/===
+analysis-chart.tsx[FU7M]: F:根据后端ChartSpec绘制Plotly地图、柱状图和散点图并提供PNG下载 | R:code:frontend/src/lib/types.ts,code:frontend/src/lib/downloads.ts,code:frontend/public/plotly-topojson/world_110m.json | A:动态加载Plotly、复用主题变量并在卸载时清理图形 | S:地图底图从本地TopoJSON目录读取；仅呈现后端生成的图表规格
+auth-gate.tsx[FU8M]: F:检查当前登录身份并提供登录、注册、访客进入及退出的页面门禁 | R:code:frontend/src/lib/api.ts,code:frontend/src/app/layout.tsx | A:AuthGate通过上下文提供用户和signOut，监听会话失效事件 | S:401转为未登录；后端连接错误单独显示重试界面
+chat-workspace.tsx[FU9L]: F:管理聊天会话、流式问答和分析结果的交互展示 | R:code:frontend/src/lib/api.ts,code:frontend/src/lib/types.ts,code:frontend/src/components/session-sidebar.tsx | A:解析run_started、step、reasoning_delta、answer_delta、complete和error事件，展示结果、来源、警告、图表及链路入口 | S:按会话恢复历史；前端不计算科学统计；流式连接缺少终止事件视为异常
+legacy-trace-redirect.tsx[FU4T]: F:根据旧trace_id查询所属会话并替换为正式链路详情地址 | R:code:frontend/src/lib/api.ts,code:frontend/src/app/traces/page.tsx | A:LegacyTraceRedirect加载Trace后使用router.replace | S:查询失败呈现错误；卸载时中止请求
+question-suggestions.tsx[FU5S]: F:获取并轮换可执行的示例科研问题供首页快捷提交 | R:code:frontend/src/lib/api.ts,code:frontend/src/components/chat-workspace.tsx | A:支持排除近期问题、加载状态、刷新和错误重试 | S:用户选择问题后交给聊天工作区提交
+result-table.tsx[FU6S]: F:从结构化分析结果抽取表格并支持CSV导出 | R:code:frontend/src/lib/downloads.ts,code:frontend/src/components/chat-workspace.tsx | A:优先识别样本、ASV、观测、分组及数据点列表，也展示其他对象数组 | S:空值显示NA；最多显示前八列；不重算后端结果
+session-sidebar.tsx[FU8L]: F:呈现用户会话列表并管理新建、切换、重命名、置顶、批量删除及登出 | R:code:frontend/src/lib/api.ts,code:frontend/src/components/chat-workspace.tsx,code:frontend/src/components/auth-gate.tsx | A:SessionSidebar按刷新版本同步列表并向工作区回传选择和删除事件 | S:删除前显示确认；会话操作遵循当前登录用户权限
+trace-workspace.tsx[FU9L]: F:呈现一个会话的Trace列表、科学摘要与同一树中的可展开技术Span细节 | R:code:frontend/src/lib/api.ts,code:frontend/src/lib/types.ts,code:frontend/src/app/sessions/[sessionId]/traces/page.tsx | A:TraceWorkspace轮询运行中的链路，按parent_span_id重建树并提供节点详情及原始JSON展开 | S:默认展示方法、来源和结论；树节点保持实际父子关系
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/frontend/src/lib/===
+api.ts[EU8M]: F:封装浏览器对认证、建议问题、会话及Trace API的请求与分页读取 | R:code:frontend/src/lib/types.ts,code:frontend/src/components/auth-gate.tsx,code:frontend/src/components/session-sidebar.tsx | A:优先使用NEXT_PUBLIC_API_BASE_URL，否则使用同源地址；401发布会话失效事件 | S:所有请求携带cookie凭据；会话及链路路径参数编码
+downloads.ts[EU6T]: F:为分析表格导出生成安全文件名和可供电子表格读取的CSV | R:code:frontend/src/components/result-table.tsx,code:frontend/src/components/analysis-chart.tsx | A:汇总所有列，使用UTF-8 BOM与CRLF并在浏览器触发下载 | S:前缀=、+、-、@或控制符的单元格加前导单引号防止公式执行
+format.ts[EU3T]: F:将时间戳和毫秒耗时格式化供会话与链路界面显示 | R:code:frontend/src/components/session-sidebar.tsx,code:frontend/src/components/trace-workspace.tsx | A:formatDateTime返回本地日期时间；formatDuration按毫秒或秒显示 | S:-
+types.ts[EU8M]: F:定义前端与后端健康、认证、问答流、会话和统一Trace API的共享类型 | R:code:frontend/src/lib/api.ts,code:frontend/src/components/chat-workspace.tsx,code:frontend/src/components/trace-workspace.tsx | A:AgentResponse、AgentStreamEvent、TraceDetail和TraceSpan约束UI消费的数据形状 | S:TraceSpan携带父节点、来源、筛选条件、模型与错误字段
+
+===C:/Users/liste/Documents/VScodeProjects/tara-agent/frontend/src/types/===
+plotly.js-dist-min.d.ts[EC3T]: F:为无内置声明的plotly.js-dist-min映射Plotly类型 | R:code:frontend/src/components/analysis-chart.tsx,code:frontend/package.json | A:declare module让动态导入获得plotly.js类型 | S:-
