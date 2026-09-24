@@ -192,7 +192,7 @@ Entry 的语义必须来自模型对真实证据的理解。不得仅依据路�
 
 ### 任务收尾与认知维护
 
-5. 纯只读问答、分析、版本核验，或没有产生受AOCI管理对象变化的任务，不需要调用维护工具。当前AOCI版本是任意`aoci_overview` check_only或`aoci_maintain`响应里的`cognition_receipt.mcp_service_version`；二进制路径是项目`.mcp.json`里的`command`，CLI不必在PATH上。
+5. 纯只读问答、分析、版本核验，或没有产生受AOCI管理对象变化的任务，不需要调用维护工具。当前AOCI版本是任意`aoci_overview` check_only或`aoci_maintain`响应里的`cognition_receipt.mcp_service_version`；二进制路径以当前Host的MCP配置为准，本项目的Codex用户级配置位于`~/.codex/config.toml`，CLI不必在PATH上。该配置包含本机路径，换机器时须重新配置，不随Git提交。
 
 6. 发生受AOCI管理对象变化时，待其达到本次任务的最终稳定状态后，只调用一次 `aoci_maintain`。不要在每次中间修改后逐文件维护。
 

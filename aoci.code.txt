@@ -7,7 +7,7 @@
 .gitignore[FV5T]: F:隔离本地凭据、依赖、缓存、原始与处理后 Tara 数据及机器专属配置 | R:code:.env.example,code:backend/.env.example,code:AGENTS.md | A:Git 忽略规则；保留三份 README、AGENTS.md 与环境变量示例，排除本机 Codex 配置和备份 | S:原始数据目录和处理后产物不得提交；方案类 Markdown 默认不纳入 Git
 README.md[SG6T]: F:说明项目用途、本地配置、首次初始化和前后端启动步骤 | R:code:compose.yaml,code:backend/README.md,code:frontend/README.md | A:面向开发者的 PowerShell 初始化及运行命令 | S:根目录 .env 是本地配置入口，数据库密码与连接串需保持一致
 compose.yaml[RI7T]: F:定义本地PostgreSQL容器、持久卷和健康检查 | R:code:backend/src/tara_agent/config.py,code:backend/src/tara_agent/persistence/database.py | A:端口绑定本机回环地址并从环境读取数据库凭据 | S:数据库数据写入持久卷；健康检查供启动流程使用
-AGENTS.md[SG8S]: F:规定 Tara Agent 的架构边界、科研数据与工作流原则、验证要求及 AOCI 认知流程 | R:code:.gitignore | A:Codex 仓库级开发指引；要求设计前阅读方案文档，按分层职责实现并维护统一 Trace 与 AOCI 索引 | S:新运行缺少可靠完整认知时须通过 AOCI 规则和 Overview 加载；受管理对象稳定后增量维护；LLM 不得直接执行任意 Python、Shell 或 SQL
+AGENTS.md[SG8M]: F:规定 Tara Agent 的架构边界、科研数据与工作流原则、验证要求及 AOCI 认知流程 | R:code:.gitignore | A:Codex 仓库级开发指引；要求设计前阅读方案文档，按分层职责实现并维护统一 Trace 与 AOCI 索引；本机 MCP 配置不随 Git 提交 | S:新运行缺少可靠完整认知时须通过 AOCI 规则和 Overview 加载；受管理对象稳定后增量维护；LLM 不得直接执行任意 Python、Shell 或 SQL
 
 ===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/===
 .env.example[FC6T]: F:列出后端运行、数据目录、数据库池、认证和 DeepSeek 的环境配置 | R:code:backend/src/tara_agent/config.py | A:TARA_ 前缀配置、DEEPSEEK_API_KEY 示例 | S:示例密钥和密码必须替换；生产配置由环境提供

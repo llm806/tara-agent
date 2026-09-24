@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-23T11:49:15Z",
-  "updated_at": "2026-09-24T11:20:24Z",
+  "updated_at": "2026-09-24T11:24:25Z",
   "files": {
     ".editorconfig": {
       "sha256": "5b7dda100ca465f7d0a0951aa8f260713d1cd77e2065b42716510de24feb7363",
@@ -24,9 +24,9 @@
       "normalized_sha256": "830d79e9a9b33cbabbfa3b755e0be4a57084fec561b48a501b47101615dce185"
     },
     "AGENTS.md": {
-      "sha256": "be9a8864b4c1c330a542bc2780fa9dda44207d3633a5ab279b2ca87cd62505f3",
-      "size": 20827,
-      "normalized_sha256": "be9a8864b4c1c330a542bc2780fa9dda44207d3633a5ab279b2ca87cd62505f3"
+      "sha256": "4cb25dbbac504b1e46adaa1c9e548634d2c0fa5d7e83d98c1c9ca04138cbbc53",
+      "size": 20964,
+      "normalized_sha256": "4cb25dbbac504b1e46adaa1c9e548634d2c0fa5d7e83d98c1c9ca04138cbbc53"
     },
     "README.md": {
       "sha256": "bb6f72e087703830e2cc92e877a2b21214d9cddd24d21b5e26c7f63684aa7299",
@@ -39,9 +39,9 @@
       "size": 43506
     },
     "aoci.code.txt": {
-      "sha256": "7a343745f7c8df532be3d0b106e3889043749bf5c831f615271c352c568ddab2",
-      "size": 35677,
-      "normalized_sha256": "7a343745f7c8df532be3d0b106e3889043749bf5c831f615271c352c568ddab2"
+      "sha256": "18dd6064c9a062e875cbfe7707f3ffb9d4a8ca25e100ff72e99499dfbae036a7",
+      "size": 35714,
+      "normalized_sha256": "18dd6064c9a062e875cbfe7707f3ffb9d4a8ca25e100ff72e99499dfbae036a7"
     },
     "aoci.meta.txt": {
       "role": "index",
