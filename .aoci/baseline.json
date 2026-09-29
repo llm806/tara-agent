@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-09-23T11:49:15Z",
-  "updated_at": "2026-09-29T06:31:21Z",
+  "updated_at": "2026-09-29T06:40:54Z",
   "files": {
     ".editorconfig": {
       "role": "index",
@@ -39,9 +39,9 @@
       "normalized_sha256": "ad45bd1696fc37a5ba3a91d31bef4e7d143ae89df9b69ee72bdc1f27a617de60"
     },
     "aoci.code.txt": {
-      "sha256": "399b3ee7cb219ddcda67e01e519558ad9bfef2600a9620945fbf68752fbd3794",
-      "size": 36593,
-      "normalized_sha256": "399b3ee7cb219ddcda67e01e519558ad9bfef2600a9620945fbf68752fbd3794"
+      "sha256": "02087033acaef574a6c1b1c4cb8ea6b0a555c81ad396c90b323a12f50a61a224",
+      "size": 36930,
+      "normalized_sha256": "02087033acaef574a6c1b1c4cb8ea6b0a555c81ad396c90b323a12f50a61a224"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -68,10 +68,9 @@
       "normalized_sha256": "7b55f8e67b5623c4bef3fa691288da9437d79d3aba156de48d481db32ac7d16d"
     },
     "backend/README.md": {
-      "role": "index",
-      "sha256": "6b25d7583d855be0d51eb47772920654401c0a43c8a9eadc985c20a92cbb027c",
-      "size": 9218,
-      "normalized_sha256": "6b25d7583d855be0d51eb47772920654401c0a43c8a9eadc985c20a92cbb027c"
+      "sha256": "8b61a12abb993dad4b64abf9fd256409ad61e6fca8db89fcc1df925f4ccdb364",
+      "size": 7434,
+      "normalized_sha256": "8b61a12abb993dad4b64abf9fd256409ad61e6fca8db89fcc1df925f4ccdb364"
     },
     "backend/alembic.ini": {
       "role": "index",
@@ -656,10 +655,9 @@
       "normalized_sha256": "da2c78e32c1e0b62f438e3a0813a7e22c24c5bc7090d7b0125cb6dae96d6abd1"
     },
     "frontend/README.md": {
-      "role": "index",
-      "sha256": "ec4dce85b2b2eefd8589b6697acd9f1574554ae4324b75d21c74e8f115427874",
-      "size": 623,
-      "normalized_sha256": "ec4dce85b2b2eefd8589b6697acd9f1574554ae4324b75d21c74e8f115427874"
+      "sha256": "9687ce59a2bb9a831e3aed235da18dc1277c2e4d4d2fd30ecbd0034dc641355c",
+      "size": 2963,
+      "normalized_sha256": "9687ce59a2bb9a831e3aed235da18dc1277c2e4d4d2fd30ecbd0034dc641355c"
     },
     "frontend/eslint.config.mjs": {
       "role": "index",

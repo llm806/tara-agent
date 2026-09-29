@@ -13,7 +13,7 @@ tara-agent方案文档.md[SB8M]: F:描述 Tara Agent 当前数据、工具、工
 ===C:/Users/liste/Documents/VScodeProjects/tara-agent/backend/===
 .env.example[FC6T]: F:列出后端运行、数据目录、数据库池、认证和 DeepSeek 的环境配置 | R:code:backend/src/tara_agent/config.py | A:TARA_ 前缀配置、DEEPSEEK_API_KEY 示例 | S:示例密钥和密码必须替换；生产配置由环境提供
 .python-version[FV2T]: F:指定后端开发环境使用的 Python 3.12 版本 | R:code:backend/pyproject.toml | A:uv 与版本管理工具读取的版本文件 | S:-
-README.md[SB7S]: F:说明后端分层、迁移、预处理、测试和可复现数据访问的开发契约 | R:code:backend/src/tara_agent/data/preprocess.py,code:backend/src/tara_agent/data/reader.py,code:backend/migrations/env.py | A:后端初始化、迁移、tara-data 与测试命令 | S:原始 TSV 保持只读；运行时只读取经过校验的 Parquet 产物
+README.md[SB7S]: F:说明后端当前分层、六种工具、科学边界、工作流、持久化和按条件执行的开发验证 | R:code:README.md,code:backend/src/tara_agent/data/preprocess.py,code:backend/src/tara_agent/agent/gateway.py,code:backend/migrations/env.py | A:初始化引用根指南；API 启动与状态接口；数据处理和独立 MCP 命令；普通测试与真实数据、数据库测试条件 | S:网页无需单独启动 MCP；真实数据测试固定使用根数据目录；数据库测试须在独立终端指向测试库
 alembic.ini[FC5T]: F:配置 Alembic 迁移脚本位置、Python 搜索路径和日志输出 | R:code:backend/migrations/env.py | A:alembic 的 script_location、prepend_sys_path 和日志设置 | S:-
 pyproject.toml[FV8T]: F:声明后端 Python 包、运行与开发依赖、命令入口及测试格式配置 | R:code:backend/src/tara_agent/api/app.py,code:backend/src/tara_agent/data/cli.py,code:backend/src/tara_agent/mcp/server.py | A:tara-data、tara-mcp 脚本；FastAPI、pytest、Ruff、uv 配置 | S:Python 要求 >=3.12,<3.14；DuckDB 仅属于开发依赖
 uv.lock[FV5L]: F:锁定后端Python依赖版本、分发地址和校验摘要以复现安装 | R:code:backend/pyproject.toml | A:由依赖管理工具按pyproject解析生成 | S:生成文件不手工编辑
@@ -118,7 +118,7 @@ repositories.py[DP9L]: F:以用户作用域管理对话、运行消息和Trace S
 
 ===C:/Users/liste/Documents/VScodeProjects/tara-agent/frontend/===
 .env.example[CI3T]: F:给出前端可选 API 基址和开发来源域名的环境变量示例 | R:code:frontend/src/lib/api.ts,code:frontend/next.config.ts | A:NEXT_PUBLIC_API_BASE_URL 留空时使用同源 API 代理；TARA_ALLOWED_DEV_ORIGIN 为不含协议的外部开发域名 | S:NEXT_PUBLIC_ 变量会公开给浏览器，不得放入密钥
-README.md[CZ4T]: F:说明前端本地启动步骤和交互展示职责 | R:code:frontend/package.json,code:frontend/src/components/chat-workspace.tsx | A:记录健康检查、流式问答、链路和图表展示 | S:统计计算由后端完成
+README.md[SU5T]: F:说明前端当前交互展示功能、文件位置、日常开发和改动检查 | R:code:README.md,code:frontend/package.json,code:frontend/next.config.ts,code:frontend/src/lib/types.ts | A:初始化引用根指南；dev 与锁定安装；lint、typecheck、build 用途；可选配置、科学展示和流式完成约定 | S:本地默认代理不要求创建前端 env 文件
 eslint.config.mjs[FC3T]: F:配置Next与TypeScript的ESLint规则并忽略构建产物 | R:code:frontend/package.json | A:供pnpm lint使用 | S:-
 next.config.ts[FI6T]: F:配置 Next 开发来源及同源 API 路径到本机后端的重写 | R:code:frontend/.env.example,code:frontend/src/lib/api.ts | A:/api/:path* 转发至 127.0.0.1:8000/api/:path*；TARA_ALLOWED_DEV_ORIGIN 可选地开放外部开发域名 | S:代理只指向本机开发后端；个人开发域名由本机环境配置，不写死在共享源码
 package.json[FC6T]: F:声明前端脚本和Next、React、Plotly等直接依赖版本 | R:code:frontend/pnpm-lock.yaml,code:frontend/next.config.ts | A:提供dev、build、start、lint和typecheck命令 | S:使用pnpm 10.12.4及锁文件保持安装可复现
