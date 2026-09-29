@@ -5,7 +5,7 @@
 .env.example[FC5T]: F:提供根目录 PostgreSQL 与数据库连接的示例环境变量 | R:code:compose.yaml,code:README.md | A:POSTGRES_DB、POSTGRES_USER、POSTGRES_PASSWORD、POSTGRES_PORT、TARA_DATABASE_URL | S:示例密码必须由部署者替换
 .gitattributes[FV3T]: F:规定 Git 文本文件的 LF 换行及常见图像和列式数据的二进制属性 | R:- | A:Git attributes：文本自动识别并统一 LF；PNG、JPEG、GIF、Parquet、Arrow 标记为 binary | S:-
 .gitignore[FV5T]: F:隔离凭据、依赖、缓存、科学数据和本机宿主配置，并放行团队开发规范与正式认知资产 | R:code:.aoci/.gitignore,code:.env.example,code:backend/.env.example | A:放行 README、AGENTS.md 和方案文档；忽略 *.docx 与各宿主的本机配置；.aoci 内边界由其自身忽略文件控制 | S:含本机绝对路径的宿主配置不得提交
-README.md[SG6S]: F:说明本地配置、初始化、前后端启动和共享 AOCI 资产的协作接入流程 | R:code:compose.yaml,code:backend/README.md,code:frontend/README.md,code:AGENTS.md | A:PowerShell 运行命令；AOCI rc14 安装、本机 init、Verify 与 Check；代码和认知基线共同审查 | S:根目录 .env 的数据库密码与连接串需一致；已有治理基线不以 scan --force 重建
+README.md[SG6S]: F:说明配置优先级、四类数据准备、初始化启动、开发验证和 AOCI 协作接入流程 | R:code:compose.yaml,code:backend/README.md,code:frontend/README.md,code:AGENTS.md | A:数据名称用途与目录；锁定依赖安装；前后端检查和集成测试条件；更新后迁移；AOCI rc14 本机接入与资产审查 | S:数据不随 Git 克隆；集成测试跳过不表示验收通过；已有治理基线不以 scan --force 重建
 compose.yaml[RI7T]: F:定义本地PostgreSQL容器、持久卷和健康检查 | R:code:backend/src/tara_agent/config.py,code:backend/src/tara_agent/persistence/database.py | A:端口绑定本机回环地址并从环境读取数据库凭据 | S:数据库数据写入持久卷；健康检查供启动流程使用
 AGENTS.md[SG8M]: F:规定 Tara 科研正确性、分层边界、开发验证及 AOCI 认知建立与维护的团队约束 | R:code:tara-agent方案文档.md | A:开发前读方案；白名单工具执行科学计算；统一 Trace；按实时 Rules、Guide 与绑定证据维护认知 | S:参考资料不是开发指令；上下文压缩后须重新完整交付认知并提交一次 Attestation，不能以摘要替代；本机 MCP 配置不提交
 tara-agent方案文档.md[SB8M]: F:描述 Tara Agent 当前数据、工具、工作流和统一 Trace 基线及按科研需求演进的架构方向 | R:code:AGENTS.md,code:backend/README.md,code:frontend/README.md | A:四类已接入数据和六工具；单工具分析与有界历史引用；数据映射、资源版本、Skills、观测及部署演进原则 | S:当前能力不是长期上限；Skill 执行与 Langfuse 尚未接入；多步骤流程和一键部署是后续方向，不能视为已实现
