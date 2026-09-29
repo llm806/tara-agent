@@ -54,16 +54,19 @@ Thumbs.db
 !/README.md
 !backend/README.md
 !frontend/README.md
+!/AGENTS.md
+!/tara-agent方案文档.md
 
 .codex-reference/
 
 backend/trace-test-temp/
 
-# Local agent configuration and cognition assets
+# Local agent host configuration; shared AOCI assets use .aoci/.gitignore.
 .codex/
-.aoci/
-/aoci.txt
-/aoci.meta.txt
-/aoci.code.txt
-/aoci.database.txt
+.mcp.json
+.claude/settings.json
+.cursor/mcp.json
+opencode.json
+opencode.jsonc
+.opencode/
 AGENTS.md.backup.*

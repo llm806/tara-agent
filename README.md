@@ -80,3 +80,29 @@ pnpm dev
 
 - 系统页面：`http://localhost:3000`
 - 后端健康检查：`http://localhost:8000/api/v1/health`
+
+## 协同开发与 AOCI
+
+开始开发前阅读 `AGENTS.md` 和 `tara-agent方案文档.md`。仓库共享 `aoci.txt`、
+`aoci.meta.txt`、`aoci.code.txt`，以及 `.aoci/.gitignore`、`config.json` 和
+`baseline.json`；可选的数据库基线与 Curation 决策按 `.aoci/.gitignore` 放行。
+Ledger、草稿、事务、恢复记录和本机宿主配置保持本地。
+
+本仓库当前使用 AOCI-CODE `v0.1.0-rc14`。新成员按
+[官方安装说明](https://github.com/aoci-spec/aoci-code/blob/v0.1.0-rc14/docs/install.md)
+安装并校验同版本二进制，然后在仓库根目录配置本机 Agent：
+
+```powershell
+# 将占位路径替换为本机已校验的 AOCI 二进制路径。
+& '<本机 AOCI 二进制绝对路径>' --repo . init --agent codex
+& '<本机 AOCI 二进制绝对路径>' --repo . verify --json
+& '<本机 AOCI 二进制绝对路径>' --repo . check --json
+```
+
+使用其他宿主时按[官方集成说明](https://github.com/aoci-spec/aoci-code/blob/v0.1.0-rc14/docs/agent-integrations.md)
+选择对应 Agent。宿主配置包含本机路径，不提交到 Git；当前会话未加载 MCP 时刷新或重新打开项目。
+已有索引和基线随仓库克隆，遇到漂移时交给实时 Guide 处理，不用 `scan --force` 重建基线。
+
+每次开发由 Agent 读取当前认知、调查源码并完成验证，最终通过 AOCI 维护受影响条目。
+提交时一起审查代码、认知索引和基线差异；合并冲突后重新执行 Verify、Check 和 Guide，
+不手工拼接基线哈希，也不覆盖另一成员尚未完成的事务。
