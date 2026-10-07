@@ -20,10 +20,10 @@ class ResearchSource(BaseModel):
 
 class ResearchManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    version: Literal["research-context-v1"]
+    version: Literal["research-context-v1", "research-context-v2"]
     core_generation: str = Field(min_length=1)
-    files: dict[Literal["environment", "sample_mapping"], FileRecord]
-    sources: dict[Literal["environment", "sample_mapping"], ResearchSource]
+    files: dict[Literal["environment", "sample_mapping", "sample_environment"], FileRecord]
+    sources: dict[Literal["environment", "sample_mapping", "sample_environment"], ResearchSource]
     units: dict[str, str] = Field(default_factory=dict)
     matou_manifest_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     mapping_coverage: dict[str, int] = Field(default_factory=dict)
@@ -32,6 +32,10 @@ class ResearchManifest(BaseModel):
     def check_sources(self):
         if not self.files or self.files.keys() != self.sources.keys():
             raise ValueError("研究资料产物与来源不完整")
+        if "sample_environment" in self.files and (
+            self.version != "research-context-v2" or not self.sources["sample_environment"].version
+        ):
+            raise ValueError("样本环境补充需要v2资料包和明确来源版本")
         if "sample_mapping" in self.files and (
             not self.matou_manifest_sha256 or not self.sources["sample_mapping"].version
         ):
@@ -87,6 +91,8 @@ class ResearchContext:
                     or frame.unique(["assay", "sample_name"]).height != frame.height
                 ):
                     raise ValueError("跨库映射结构或唯一键无效")
+            elif key == "sample_environment":
+                validate_sample_environment(frame)
             else:
                 if (
                     not {"station", "depth"} <= set(frame.columns)
@@ -98,6 +104,34 @@ class ResearchContext:
             check_file(path, record)
             self.ensure_unchanged()
             return frame
+
+
+def validate_sample_environment(frame):
+    """样本身份与环境量分别保留证据；不按站位推断，不填补测量缺失。"""
+    required = {
+        "sample_id_pangaea",
+        "variable",
+        "value",
+        "unit",
+        "evidence",
+        "method",
+        "context_details",
+    }
+    if set(frame.columns) != required or not frame.height:
+        raise ValueError("样本环境补充表列不完整或为空")
+    for field in required - {"value"}:
+        if frame[field].dtype != pl.String or any(
+            v is None or not v.strip() or v != v.strip() for v in frame[field]
+        ):
+            raise ValueError("样本环境补充表缺少有效文本：" + field)
+    if frame.unique(["sample_id_pangaea", "variable"]).height != frame.height:
+        raise ValueError("样本环境补充表存在重复样本变量")
+    if (
+        not frame["value"].dtype.is_numeric()
+        or frame.filter(pl.col("value").is_not_null() & ~pl.col("value").is_finite()).height
+    ):
+        raise ValueError("样本环境值必须为有限数值或缺失")
+    return frame
 
 
 def station_key(value):
@@ -119,6 +153,9 @@ def prepare_research(
     matou_dir=None,
     units=None,
     environment_source=None,
+    sample_environment=None,
+    sample_environment_source=None,
+    sample_environment_version=None,
 ):
     """只接受显式证据和唯一键；清单最后发布，拒绝覆盖，原始数据只读。"""
     import json
@@ -130,6 +167,24 @@ def prepare_research(
     context = reader.load_sample_context()
     files, sources, extra = {}, {}, {}
     frames = {}
+    supplement_ids = set()
+    if sample_environment is not None:
+        if not sample_environment_source or not sample_environment_version:
+            raise ValueError("样本环境补充需要来源和版本")
+        record = describe(sample_environment)
+        frame = pl.read_csv(sample_environment, separator="\t", infer_schema=False)
+        if "value" not in frame.columns:
+            raise ValueError("样本环境补充缺少value列")
+        frame = frame.with_columns(pl.col("value").cast(pl.Float64))
+        validate_sample_environment(frame)
+        supplement_ids = set(frame["sample_id_pangaea"])
+        frames["sample_environment"] = frame
+        sources["sample_environment"] = {
+            "source": sample_environment_source,
+            "version": sample_environment_version,
+            "file": record.model_dump(),
+        }
+        check_file(sample_environment, record)
     if environment is not None:
         if not environment_source or not units:
             raise ValueError("环境表必须记录来源和变量单位")
@@ -172,7 +227,10 @@ def prepare_research(
             raise ValueError("映射字段不能空白或有首尾空格")
         if frame.unique(["assay", "sample_name"]).height != frame.height:
             raise ValueError("一个MATOU实验样本不能指向多个PANGAEA样本")
-        if not set(frame["sample_id_pangaea"]) <= set(context["sample_id_pangaea"]):
+        if (
+            not set(frame["sample_id_pangaea"])
+            <= set(context["sample_id_pangaea"]) | supplement_ids
+        ):
             raise ValueError("映射含未知PANGAEA编号")
         available = {(s.assay, s.sample_name) for s in matou.manifest.samples}
         if not set(frame.select("assay", "sample_name").iter_rows()) <= available:
@@ -190,7 +248,11 @@ def prepare_research(
         raise ValueError("至少提供环境表或经核验的样本映射")
     output_dir = Path(output_dir).resolve()
     # 派生产物不得覆盖输入；源目录也不能被新输出包含。
-    inputs = [Path(p).resolve() for p in (environment, sample_mapping) if p is not None]
+    inputs = [
+        Path(p).resolve()
+        for p in (environment, sample_mapping, sample_environment)
+        if p is not None
+    ]
     if any(p.is_relative_to(output_dir) for p in inputs):
         raise ValueError("研究资料输出不能包含原始输入")
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -201,7 +263,9 @@ def prepare_research(
     (output_dir / "manifest.json").write_text(
         json.dumps(
             {
-                "version": "research-context-v1",
+                "version": "research-context-v2"
+                if sample_environment is not None
+                else "research-context-v1",
                 "core_generation": reader.manifest.generation,
                 "files": files,
                 "sources": sources,

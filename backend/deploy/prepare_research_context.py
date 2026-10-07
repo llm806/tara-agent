@@ -22,6 +22,9 @@ def main():
     parser.add_argument("--mapping-source")
     parser.add_argument("--mapping-version")
     parser.add_argument("--matou-dir", type=Path)
+    parser.add_argument("--sample-environment", type=Path)
+    parser.add_argument("--sample-environment-source")
+    parser.add_argument("--sample-environment-version")
     args = parser.parse_args()
     units = json.loads(args.units_json.read_text(encoding="utf-8")) if args.units_json else None
     if args.download_paper_environment:
@@ -59,6 +62,9 @@ def main():
         mapping_source=args.mapping_source,
         mapping_version=args.mapping_version,
         matou_dir=args.matou_dir,
+        sample_environment=args.sample_environment,
+        sample_environment_source=args.sample_environment_source,
+        sample_environment_version=args.sample_environment_version,
     )
     print(
         json.dumps({"status": "prepared", "output_dir": str(args.output_dir)}, ensure_ascii=False)

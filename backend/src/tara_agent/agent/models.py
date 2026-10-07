@@ -207,6 +207,7 @@ class ChartSpec(BaseModel):
     y_label: str
     series: list[dict[str, Any]] = Field(default_factory=list)
     result_role: Literal["intermediate", "final"] = "final"
+    artifact_key: str | None = None
 
 
 class ToolTrace(BaseModel):

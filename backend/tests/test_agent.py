@@ -8,7 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from tara_agent.agent import AgentModel
-from tara_agent.agent.gateway import MCPToolGateway
+from tara_agent.agent.gateway import AgentToolError, MCPToolGateway
 from tara_agent.agent.graph import TaraAgent
 from tara_agent.agent.models import (
     CORE_TOOLS,
@@ -490,3 +490,17 @@ async def test_clarification_response_uses_recent_conversation_messages(
     assert representative_model.plan_context.analysis_references == []
     assert response.tool is not None
     assert response.tool.name == ToolName.DIVERSITY_ANALYSIS
+
+
+@pytest.mark.anyio
+async def test_unregistered_tool_fails_with_handled_error(tara_agent, monkeypatch):
+    async def unavailable_plan(*args):
+        return ToolPlan(tool_name="function_study", arguments={"query": {}}, rationale="功能分析")
+
+    async def unexpected_call(*args):
+        pytest.fail("未注册工具不能进入执行")
+
+    monkeypatch.setattr(tara_agent.model, "plan", unavailable_plan)
+    monkeypatch.setattr(tara_agent.gateway, "call", unexpected_call)
+    with pytest.raises(AgentToolError, match="未启用工具 function_study"):
+        await tara_agent.run("找一个 Tara 样本")

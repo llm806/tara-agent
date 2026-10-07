@@ -30,8 +30,8 @@ from tara_agent.agent.prompts import (
 from tara_agent.agent.resources import CAPABILITY_PROFILE
 from tara_agent.config import Settings
 
-# 思考内容也占输出额度，为复杂分析的最终解释保留足够空间。
-ANSWER_MAX_TOKENS = 8192
+# 最终汇总只解释已验证结果；关闭思考并保留较大的正文输出额度。
+ANSWER_MAX_TOKENS = 65536
 
 
 class AgentModelError(RuntimeError):
@@ -111,8 +111,7 @@ class DeepSeekChatModel:
             "multi_planner": {"max_tokens": 2_000, "thinking": "disabled"},
             "answer": {
                 "max_tokens": ANSWER_MAX_TOKENS,
-                "reasoning_effort": self.reasoning_effort,
-                "thinking": "enabled",
+                "thinking": "disabled",
             },
         }
 
@@ -211,6 +210,10 @@ class DeepSeekChatModel:
         if len(tool_calls) != 1:
             raise AgentModelError("模型未返回有效的分析工具，请重新提问。")
         tool_call = tool_calls[0]
+        if tool_call.function.name not in {tool.name.value for tool in tools}:
+            raise AgentModelError(
+                f"当前数据服务未启用工具 {tool_call.function.name}，请检查服务器数据配置。"
+            )
         try:
             arguments = json.loads(tool_call.function.arguments)
             return ToolPlan(
@@ -308,10 +311,9 @@ class DeepSeekChatModel:
                     {"role": "user", "content": user_content},
                 ],
                 max_tokens=ANSWER_MAX_TOKENS,
-                reasoning_effort=self.reasoning_effort,
                 stream=True,
                 stream_options={"include_usage": True},
-                extra_body={"thinking": {"type": "enabled"}},
+                extra_body={"thinking": {"type": "disabled"}},
             )
             received_content = False
             finish_reason = None

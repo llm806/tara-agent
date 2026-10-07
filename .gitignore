@@ -65,7 +65,7 @@ Thumbs.db
 
 backend/trace-test-temp/
 
-# Local agent host configuration; shared AOCI assets use .aoci/.gitignore.
+# Local agent host configuration.
 .codex/
 .mcp.json
 .claude/settings.json

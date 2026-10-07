@@ -51,13 +51,33 @@ export function summarizeDataFilters(name: string, filters: Record<string, unkno
   return tags;
 }
 
-export function dataSourceLabel(name: string): string {
-  return ({
+const datasetFiles: Record<string, string> = {
     context_general: "context_general.tsv", context_stat: "context_stat.tsv",
     "18s_v4": "TARA-Oceans_18S-V4_dada2_table.tsv",
     "18s_v9": "TARA-Oceans_18S-V9_dada2_table.tsv",
     matou_taxonomy: "MATOU-v1.5.taxonomy.tsv.gz", matou_pfam: "MATOU-v1.5.pfam.gz",
     matou_metag: "MATOU-v1.5.metaG.occurrences.gz", matou_metat: "MATOU-v1.5.metaT.occurrences.gz",
     matou_fasta: "MATOU-v1.5.fna.gz",
-  } as Record<string, string>)[name] ?? name;
+};
+
+export function dataSourceLabel(name: string): string {
+  return datasetFiles[name] ?? name;
+}
+
+const referenceFiles = new Set([
+  "PfamA.list", "station_ocean.tsv", "physicochemistry.for.metaT.tsv",
+  "station_Lat_Long_uniq.withTaraPrefix.tsv", "LHC.diatoms.MATOUv1.5.seqs.function.tsv.gz",
+  "Bacillariophyta.MATOU-v1.5.Pfam.metaG.tsv.gz", "Bacillariophyta.MATOU-v1.5.Pfam.metaT.tsv.gz",
+  "physicochemistry.tsv",
+]);
+
+// 先统一已知标识再去重；参考资料保留展示，未知来源不猜测所属类别。
+export function sourceGroups(sources: string[]) {
+  const filenames = [...new Set(sources.filter(Boolean).map(dataSourceLabel))];
+  const originals = new Set(Object.values(datasetFiles));
+  return [
+    { label: "原始数据", files: filenames.filter((name) => originals.has(name)) },
+    { label: "补充参考资料", files: filenames.filter((name) => referenceFiles.has(name)) },
+    { label: "其他来源", files: filenames.filter((name) => !originals.has(name) && !referenceFiles.has(name)) },
+  ].filter((group) => group.files.length > 0);
 }

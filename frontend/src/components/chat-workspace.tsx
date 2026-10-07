@@ -21,9 +21,11 @@ import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { ResultTable } from "@/components/result-table";
-import { ArtifactHeading } from "@/components/artifact-heading";
+import { findTables, ResultTableSection } from "@/components/result-table";
+import { ArtifactHeading, DataSourceList } from "@/components/artifact-heading";
 import { chartKindLabels, chartSummary } from "@/lib/artifact-summary";
+import { artifactChoices, type ArtifactChoice } from "@/lib/artifact-presentation";
+import { processPresentation } from "@/lib/process-presentation";
 import { ConversationNavigation } from "@/components/conversation-navigation";
 import { ResponseCardGroup, useResponseCard } from "@/components/response-card-group";
 import { QuestionSuggestions } from "@/components/question-suggestions";
@@ -434,6 +436,10 @@ function UserMessage({ question, createdAt }: { question: string; createdAt: str
   );
 }
 
+function SourceFiles({ sources }: { sources: string[] }) {
+  return <DataSourceList sources={sources} />;
+}
+
 function HistoricalMeta({ run }: { run: Run }) {
   return (
     <footer className="provenance">
@@ -442,10 +448,7 @@ function HistoricalMeta({ run }: { run: Run }) {
       </time>
       {run.model ? <span>模型 {run.model}</span> : null}
       {run.sources && run.sources.length > 0 ? (
-        <span className="source-files">
-          数据来源
-          {run.sources.map((source) => <code key={source}>{source}</code>)}
-        </span>
+        <SourceFiles sources={run.sources} />
       ) : null}
     </footer>
   );
@@ -472,7 +475,7 @@ function ProcessPanel({ steps, response, active, analysis }: ProcessPanelProps) 
     >
       {steps.length > 0 ? (
         <ol>
-          {steps.map((step, index) => <li key={`${step.stage}-${index}`}><strong>{step.title}</strong><span>{step.detail}</span></li>)}
+          {steps.map(processPresentation).map((step, index) => <li key={`${step.stage}-${index}`}><strong>{step.title}</strong><span>{step.detail}</span></li>)}
         </ol>
       ) : (
         <p className="progress-placeholder">
@@ -564,6 +567,28 @@ function CompletedArtifacts({
   response: AgentResponse;
   timestamp: string;
 }) {
+  const [selectedExtras, setSelectedExtras] = useState<string[]>([]);
+  const tables = useMemo(() => findTables(response.result, response.sources), [response]);
+  const choices = useMemo(() => artifactChoices(response, tables), [response, tables]);
+  const primary = choices.filter((choice) => choice.primary);
+  const extras = choices.filter((choice) => !choice.primary);
+  const groups = [...new Set(primary.map((choice) => choice.group ?? "核心结果"))];
+  function renderArtifact(choice: ArtifactChoice) {
+    if (choice.kind === "table") {
+      const table = tables[choice.index];
+      return <ResultTableSection key={choice.id} label={table.label} rows={table.rows}
+        scope={table.scope} sources={table.sources} />;
+    }
+    const chart = response.charts[choice.index];
+    return (
+      <DisclosureSection key={choice.id} className="chart-panel"
+        icon={<ChartNoAxesCombined size={18} />}
+        title={<ArtifactHeading title={`${choice.resultRole === "intermediate" ? "【中间步骤结果】" : "【最终结果】"}${choice.label}`} {...chartSummary(chart, response)} />}
+        meta={chartKindLabels[chart.kind]}>
+        <AnalysisChart chart={{ ...chart, title: choice.label }} />
+      </DisclosureSection>
+    );
+  }
   return (
     <>
       {response.warnings.length > 0 ? (
@@ -584,31 +609,43 @@ function CompletedArtifacts({
         </DisclosureSection>
       ) : null}
 
-      {response.charts.map((chart) => (
-        <DisclosureSection
-          key={`${chart.kind}-${chart.title}`}
-          className="chart-panel"
-          icon={<ChartNoAxesCombined size={18} />}
-          title={<ArtifactHeading title={`${chart.result_role === "intermediate" ? "【中间步骤结果】" : "【最终结果】"}${chart.title}`} {...chartSummary(chart, response)} />}
-          meta={chartKindLabels[chart.kind]}
-        >
-          <AnalysisChart chart={chart} />
-        </DisclosureSection>
+      {groups.map((group, index) => (
+        <section className="core-result-group" key={group} aria-label={group}>
+          {group !== "核心结果" ? <h3>{index + 1}. {group}</h3> : null}
+          {primary.filter((choice) => (choice.group ?? "核心结果") === group).map(renderArtifact)}
+        </section>
       ))}
-      <ResultTable result={response.result} sources={response.sources} />
 
       <footer className="provenance">
         <time dateTime={timestamp}>{formatDateTime(timestamp)}</time>
         <span>模型 {response.model}</span>
         {response.tool || response.sources.length > 0 ? (
-          <span className="source-files">
-            数据来源
-            {response.sources.length > 0
-              ? response.sources.map((source) => <code key={source}>{source}</code>)
-              : "未声明"}
-          </span>
+          <SourceFiles sources={response.sources} />
         ) : null}
       </footer>
+      {extras.length > 0 ? (
+        <div className="additional-artifacts">
+          <p>{primary.length ? "已展示核心结果。" : "本轮结果已保留。"}还需查看补充图表或中间步骤？勾选后在下方显示。</p>
+          <details className="artifact-picker">
+            <summary>选择更多结果（{extras.length} 项{selectedExtras.length ? `，已选 ${selectedExtras.length} 项` : ""}）</summary>
+            <div className="artifact-picker-options">
+              {extras.map((choice) => (
+                <label key={choice.id}>
+                  <input type="checkbox" checked={selectedExtras.includes(choice.id)}
+                    onChange={(event) => setSelectedExtras((current) => event.target.checked
+                      ? [...current, choice.id] : current.filter((id) => id !== choice.id))} />
+                  <span>{choice.kind === "chart" ? "图" : "表"} · {choice.label}</span>
+                </label>
+              ))}
+            </div>
+          </details>
+          {selectedExtras.length > 0 ? <button type="button" className="artifact-picker-clear"
+            onClick={() => setSelectedExtras([])}>收起所选补充结果</button> : null}
+          <div className="selected-artifacts">
+            {extras.filter((choice) => selectedExtras.includes(choice.id)).map(renderArtifact)}
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

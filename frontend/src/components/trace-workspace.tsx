@@ -21,7 +21,8 @@ import remarkGfm from "remark-gfm";
 
 import { getSessionTrace, listSessionTraces } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/format";
-import { dataSourceLabel, summarizeDataFilters } from "@/lib/trace-data-summary";
+import { sourceGroups, summarizeDataFilters } from "@/lib/trace-data-summary";
+import { DataSourceList } from "@/components/artifact-heading";
 import type { DataSource, TraceDetail, TraceSpan, TraceSummary } from "@/lib/types";
 
 type TraceWorkspaceProps = { sessionId: string; initialTraceId?: string };
@@ -338,9 +339,7 @@ function AnalysisOverview({ trace }: { trace: TraceDetail }) {
         <div>
           <span>数据与筛选</span>
           {sources.length ? (
-            <div className="trace-data-chips">使用{sources.map((source) => (
-              <code key={source} title={source}>{dataSourceLabel(source)}</code>
-            ))}数据。</div>
+            <DataSourceList sources={sources} />
           ) : <p>尚未记录数据来源</p>}
           {commonTags.length > 0 ? <div className="trace-filter-tags">{commonTags.map((tag) => (
             <code key={tag.label} title={tag.detail}>{tag.label}：{tag.value}</code>
@@ -533,7 +532,7 @@ function KeyValues({ title, value }: { title: string; value: Record<string, unkn
 function SourceFiles({ sources }: { sources: DataSource[] }) {
   const filenames = [...new Set(sources.map((source) => source.filename).filter((value): value is string => Boolean(value)))];
   if (filenames.length === 0) return null;
-  return <div className="span-sources"><Database size={15} /><strong>数据来源</strong>{filenames.map((filename) => <code key={filename}>{filename}</code>)}</div>;
+  return <div className="span-sources"><DataSourceList sources={filenames} /></div>;
 }
 function JsonBlock({ title, value }: { title: string; value: Record<string, unknown> | null }) {
   if (!value || Object.keys(value).length === 0) return null;
@@ -651,8 +650,8 @@ function traceDuration(trace: TraceSummary): string {
   return formatDuration(Math.max(0, Date.now() - new Date(trace.started_at).getTime()));
 }
 function sourceCountLabel(sources: DataSource[]): string {
-  const count = new Set(sources.map((source) => source.filename).filter(Boolean)).size;
-  return count > 0 ? `${count} 个文件` : "—";
+  const groups = sourceGroups(sources.map((source) => source.filename ?? ""));
+  return groups.length ? groups.map((group) => `${group.label} ${group.files.length}`).join(" · ") : "—";
 }
 function statusClass(status: string): string {
   if (status === "completed") return "completed";

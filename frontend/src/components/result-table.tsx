@@ -7,42 +7,20 @@ import { downloadCsv, downloadFasta } from "@/lib/downloads";
 import { useResponseCard } from "@/components/response-card-group";
 import { ArtifactHeading } from "@/components/artifact-heading";
 import { artifactSummary } from "@/lib/artifact-summary";
+import { artifactTitle } from "@/lib/artifact-presentation";
 
-type ResultTableProps = {
-  result: Record<string, unknown>;
-  sources?: string[];
-};
-
-export function ResultTable({ result, sources = [] }: ResultTableProps) {
-  const tables = findTables(result, sources);
-  if (tables.length === 0) {
-    return null;
-  }
-
-  return (
-    <>
-      {tables.map((table) => (
-        <ResultTableSection
-          key={table.key}
-          label={table.label}
-          rows={table.rows}
-          scope={table.scope}
-          sources={table.sources}
-        />
-      ))}
-    </>
-  );
-}
-
-type ResultRows = {
+export type ResultRows = {
   key: string;
   label: string;
   rows: Array<Record<string, unknown>>;
   scope: string;
   sources: string[];
+  core?: boolean;
+  methodVersion?: string;
+  artifactKey?: string;
 };
 
-function ResultTableSection({ label, rows, scope, sources }: Omit<ResultRows, "key">) {
+export function ResultTableSection({ label, rows, scope, sources }: Omit<ResultRows, "key">) {
   const [open, setOpen] = useResponseCard();
   const [page, setPage] = useState(0);
   const pageSize = 100;
@@ -141,7 +119,7 @@ const resultLists = [
   ["size_composition", "四粒径相对丰度分布"],
 ] as const;
 
-function findTables(result: Record<string, unknown>, sources: string[] = []): ResultRows[] {
+export function findTables(result: Record<string, unknown>, sources: string[] = []): ResultRows[] {
   if (result.workflow === "multi_step" && Array.isArray(result.analysis_steps)) {
     return result.analysis_steps.flatMap((step, index) => {
       if (!isRecord(step) || !isRecord(step.result)) return [];
@@ -155,9 +133,24 @@ function findTables(result: Record<string, unknown>, sources: string[] = []): Re
   const tables: ResultRows[] = [];
   const summary = artifactSummary(result, sources);
   const includedKeys = new Set<string>();
-  const role = (key: string) => result.result_role === "intermediate"
-    || (isRecord(result.artifact_roles) && result.artifact_roles[key] === "intermediate")
-    ? "【中间步骤结果】" : "【最终结果】";
+  const present = (rows: ResultRows[]) => rows.map((table) => {
+    const declared = isRecord(result.artifact_roles) ? result.artifact_roles[table.key] : undefined;
+    const final = declared ? declared === "final" : result.result_role !== "intermediate";
+    // 完整输入、模型坐标与覆盖核查保留在按需列表，不作为默认科研产物。
+    const primaryKeys = result.method_version === "diatom-function-study-v1"
+      ? ["function_ranks", "size_distribution", "ocean_distribution", "target_signals"]
+      : ["items", "asvs", "observations", "groups", "composition", "ranks", "summaries",
+        "associations", "size_composition", "sequences", "sample"];
+    const auxiliary = ["sections", "excluded_samples", "sample_summaries", "mapping-coverage", "pls-models"]
+      .includes(table.key) || /-(coordinates|scores|input_rows|explained_variance|stress|distance_rows|environment_fit)$/.test(table.key);
+    return { ...table, label: artifactTitle(table.label), artifactKey: table.key,
+      methodVersion: typeof result.method_version === "string" ? result.method_version : undefined,
+      core: final && !auxiliary && (primaryKeys.includes(table.key) || declared === "final") };
+  });
+  const role = (key: string) => {
+    const declared = isRecord(result.artifact_roles) ? result.artifact_roles[key] : undefined;
+    return (declared ?? result.result_role) === "intermediate" ? "【中间步骤结果】" : "【最终结果】";
+  };
   for (const [key, label] of resultLists) {
     const value = result[key];
     if (Array.isArray(value) && value.length > 0 && value.every(isRecord)) {
@@ -222,18 +215,18 @@ function findTables(result: Record<string, unknown>, sources: string[] = []): Re
   }
   if (isRecord(result.mapping_coverage)) tables.push({ key: "mapping-coverage", label: `${role("mapping_coverage")}跨库映射覆盖表`, rows: [result.mapping_coverage], ...summary });
   if (isRecord(result.query) && result.method_version === "diatom-function-study-v1") {
-    const source = result.query.source === "paper_reference" ? "作者参考重算" : "当前数据";
+    const source = result.query.source === "paper_reference" ? "使用公开参考数据计算" : "当前数据";
     const priority = ["sections", "function_ranks", "size_distribution", "ocean_distribution", "target_signals", "pls-models"];
     tables.sort((a, b) => {
       const order = (key: string) => priority.includes(key) ? priority.indexOf(key) : priority.length;
       return order(a.key) - order(b.key);
     });
-    return tables.map((table) => ({ ...table, label: `${source} · ${table.label}` }));
+    return present(tables).map((table) => ({ ...table, label: `${source} · ${table.label}` }));
   }
   if (isRecord(result.sample)) {
     tables.push({ key: "sample", label: `${role("sample")}样本采集与环境信息表`, rows: [result.sample], ...summary });
   }
-  return tables;
+  return present(tables);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -252,7 +245,7 @@ function humanize(value: string): string {
     assay: "DNA/RNA实验", depth: "水层", size_fraction: "粒径组（μm）",
     relative_signal: "相对信号", numerator: "功能信号", denominator: "分母信号",
     denominator_scope: "分母范围",
-    figure: "论文图号", output: "输出项目", status: "完成状态", reason: "原因",
+    figure: "来源图表编号", output: "输出项目", status: "完成状态", reason: "原因",
     excluded_rows: "因缺失排除的采样组", constant_variables: "常量变量", method: "计算方法",
     variable: "变量", role: "变量类型", component_1: "成分1", component_2: "成分2",
     component: "成分", x_fraction: "环境解释比例", y_fraction: "响应解释比例",

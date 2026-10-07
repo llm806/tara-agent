@@ -109,14 +109,14 @@ CAPABILITY_PROFILE = {
     ],
 }
 
-ROUTER_PROMPT_RESOURCE = _resource("prompt.request_router", "1.9.0", ROUTER_SYSTEM_PROMPT)
-PLANNER_PROMPT_RESOURCE = _resource("prompt.tool_planner", "1.10.0", PLANNER_SYSTEM_PROMPT)
-ANSWER_PROMPT_RESOURCE = _resource("prompt.analysis_answer", "1.9.0", ANSWER_SYSTEM_PROMPT)
+ROUTER_PROMPT_RESOURCE = _resource("prompt.request_router", "1.11.0", ROUTER_SYSTEM_PROMPT)
+PLANNER_PROMPT_RESOURCE = _resource("prompt.tool_planner", "1.11.0", PLANNER_SYSTEM_PROMPT)
+ANSWER_PROMPT_RESOURCE = _resource("prompt.analysis_answer", "1.10.0", ANSWER_SYSTEM_PROMPT)
 SELECTOR_PROMPT_RESOURCE = _resource(
-    "prompt.workflow_selector", "1.3.0", WORKFLOW_SELECTOR_SYSTEM_PROMPT
+    "prompt.workflow_selector", "1.4.0", WORKFLOW_SELECTOR_SYSTEM_PROMPT
 )
 MULTI_PLANNER_PROMPT_RESOURCE = _resource(
-    "prompt.multi_step_planner", "1.8.0", MULTI_STEP_SYSTEM_PROMPT
+    "prompt.multi_step_planner", "1.9.0", MULTI_STEP_SYSTEM_PROMPT
 )
 CAPABILITY_RESOURCE = _resource("capability.tara_agent", "1.7.0", CAPABILITY_PROFILE)
 WORKFLOW_RESOURCE = _resource(

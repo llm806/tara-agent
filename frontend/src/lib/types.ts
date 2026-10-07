@@ -68,6 +68,7 @@ export type ChartSpec = {
   y_label: string;
   series?: Array<{ name: string; values?: Array<number | null>; indices?: number[]; x?: number[]; y?: number[]; text?: string[] }>;
   result_role?: "intermediate" | "final";
+  artifact_key?: string | null;
 };
 
 export type AgentResponse = {

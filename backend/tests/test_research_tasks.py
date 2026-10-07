@@ -17,7 +17,11 @@ from tara_agent.analysis.community_models import CommunityQuery, FunctionEnviron
 from tara_agent.analysis.ecology_statistics import adjust_bh, association, envfit, nmds
 from tara_agent.analysis.function_environment import FunctionEnvironmentService
 from tara_agent.data.reader import ProcessedDataReader
-from tara_agent.data.research_context import ResearchContext, prepare_research
+from tara_agent.data.research_context import (
+    ResearchContext,
+    prepare_research,
+    validate_sample_environment,
+)
 from tara_agent.data_service.app import create_app
 from tara_agent.data_service.client import RemoteToolGateway
 
@@ -232,6 +236,118 @@ def test_functional_requires_mapping_and_counts_each_specimen_once():
     assert result.points[0]["relative_signal"] == pytest.approx(0.15)
     assert result.associations[0]["sample_count"] == 3
     assert result.mapping_coverage["mapped"] == 4
+
+
+def sample_environment_rows(unit="degree_Celsius"):
+    return pl.DataFrame(
+        [
+            dict(
+                sample_id_pangaea=sid,
+                variable="temperature",
+                value=value,
+                unit=unit,
+                evidence="exact source barcode and ENA record",
+                method="sensor feature median Q2",
+                context_details='{"distance_lag_km":2.0,"time_lag":"PT1H"}',
+            )
+            for sid, value in [("s1", 999.0), ("s4", 4.0)]
+        ]
+    )
+
+
+def test_verified_sample_environment_fills_missing_without_overwriting_core():
+    mapping = pl.DataFrame(
+        dict(
+            assay=["MetaT"] * 4,
+            sample_name=["t1", "t2", "t3", "t4"],
+            sample_id_pangaea=["s1", "s2", "s3", "s4"],
+            evidence=["explicit registry"] * 4,
+        )
+    )
+    service = functional(mapping)
+    supplement = sample_environment_rows()
+    service.research.manifest = dict(
+        files={"sample_environment": {}},
+        sources={"sample_environment": {"source": "official sensors", "version": "Q2-v1"}},
+    )
+    service.research.frame = lambda key, **kwargs: (
+        supplement if key == "sample_environment" else mapping
+    )
+    result = service.analyze(FunctionEnvironmentQuery(pfam_accession="PF03382", permutations=99))
+    assert result.status == "completed"
+    assert result.mapping_coverage["valid_statistical_samples"] == 4
+    assert result.points[0]["environment_value"] == 1.0
+    assert result.points[0]["environment_source"] == "context_stat"
+    assert result.points[3]["environment_value"] == 4.0
+    assert result.points[3]["environment_context_details"] == supplement["context_details"][1]
+    assert result.associations[0]["rho"] == pytest.approx(1.0)
+    assert result.metadata.provenance.filters["supplemental_environment_values_used"] == 1
+    assert any(w.code == "supplemental_environment_context" for w in result.metadata.warnings)
+    supplement = sample_environment_rows(unit="kelvin")
+    with pytest.raises(ValueError, match="单位未经一致性核验"):
+        service.analyze(FunctionEnvironmentQuery(pfam_accession="PF03382", permutations=99))
+
+
+def test_sample_environment_rejects_ambiguous_or_nonfinite_rows():
+    frame = sample_environment_rows()
+    with pytest.raises(ValueError, match="重复"):
+        validate_sample_environment(pl.concat([frame, frame]))
+    with pytest.raises(ValueError, match="有限"):
+        validate_sample_environment(frame.with_columns(pl.lit(float("inf")).alias("value")))
+    with pytest.raises(ValueError, match="有效文本"):
+        validate_sample_environment(frame.with_columns(pl.lit("").alias("evidence")))
+    validate_sample_environment(frame.with_columns(pl.lit(None, dtype=pl.Float64).alias("value")))
+
+
+def test_sample_environment_bundle_allows_only_explicit_additional_ids(service_settings, tmp_path):
+    from .test_matou_function_data import dataset, prepare
+
+    directory = tmp_path / "matou-input"
+    directory.mkdir()
+    prepare(dataset.__wrapped__(directory))
+    mapping = tmp_path / "mapping.tsv"
+    mapping.write_text(
+        "assay\tsample_name\tsample_id_pangaea\tevidence\n"
+        "MetaT\tT-A\tOFFICIAL_EXTRA\texplicit paper row\n",
+        encoding="utf-8",
+    )
+    processed = service_settings.processed_data_dir
+    args = dict(
+        sample_mapping=mapping,
+        mapping_source="official registry",
+        mapping_version="v1",
+        matou_dir=directory / "result",
+    )
+    with pytest.raises(ValueError, match="未知PANGAEA"):
+        prepare_research(processed, tmp_path / "bad-research", **args)
+    supplement = tmp_path / "sample-environment.tsv"
+    sample_environment_rows().head(1).with_columns(
+        pl.lit("OFFICIAL_EXTRA").alias("sample_id_pangaea")
+    ).write_csv(supplement, separator="\t")
+    prepare_research(
+        processed,
+        processed / "research",
+        **args,
+        sample_environment=supplement,
+        sample_environment_source="official sensor context",
+        sample_environment_version="source-sha256-v1",
+    )
+    bundle = ResearchContext(processed)
+    assert bundle.manifest["version"] == "research-context-v2"
+    data = bundle.frame("sample_environment", generation=bundle.manifest["core_generation"])
+    assert data["sample_id_pangaea"].to_list() == ["OFFICIAL_EXTRA"]
+    from tara_agent.data.matou_reader import MatouDataReader
+
+    result = FunctionEnvironmentService(
+        ProcessedDataReader(processed), MatouDataReader(directory / "result"), bundle
+    ).analyze(FunctionEnvironmentQuery(pfam_accession="PF00002", permutations=99))
+    assert result.points[0]["sample_id"] == "OFFICIAL_EXTRA"
+    assert result.points[0]["environment_value"] == 999.0
+    assert result.points[0]["environment_source"] == "sample_environment"
+    assert result.mapping_coverage["mapped"] == 1
+    assert result.mapping_coverage["matched_context_samples"] == 1
+    with pytest.raises(ValueError, match="版本不匹配"):
+        bundle.frame("sample_environment", generation="different-core")
 
 
 def test_research_bundle_version_integrity_and_remote_pinning(service_settings, tmp_path):

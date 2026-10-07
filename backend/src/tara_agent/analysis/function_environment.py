@@ -35,6 +35,8 @@ class FunctionEnvironmentService:
         if not names or not set(names) <= available:
             raise ValueError("样本范围为空或含未知原始编号")
         points, excluded, stats = [], [], []
+        supplemental_source = None
+        supplemental_used = 0
         reason = None
         coverage = {
             "selected": len(names),
@@ -56,6 +58,25 @@ class FunctionEnvironmentService:
             context = {
                 r["sample_id_pangaea"]: r for r in self.reader.load_sample_context().to_dicts()
             }
+            field = query.environment_variable.value
+            supplements = {}
+            if self.research.manifest and "sample_environment" in self.research.manifest.get(
+                "files", {}
+            ):
+                supplement = self.research.frame(
+                    "sample_environment", generation=self.reader.manifest.generation
+                ).filter(pl.col("variable") == field)
+                expected_unit = (
+                    "degree_Celsius"
+                    if field == "temperature"
+                    else self.research.manifest.get("units", {}).get(field)
+                )
+                if supplement.height and (
+                    not expected_unit or set(supplement["unit"]) != {expected_unit}
+                ):
+                    raise ValueError("样本补充环境与核心变量单位未经一致性核验：" + field)
+                supplements = {r["sample_id_pangaea"]: r for r in supplement.to_dicts()}
+                supplemental_source = self.research.manifest["sources"]["sample_environment"]
             linked = [n for n in names if n in mappings]
             coverage["mapped"] = len(linked)
             excluded.extend(
@@ -73,11 +94,16 @@ class FunctionEnvironmentService:
                 for sample in samples:
                     mapping_row = mappings[sample["sample_name"]]
                     by_target[mapping_row["sample_id_pangaea"]].append(sample)
-                coverage["matched_context_samples"] = len(by_target)
-                field = query.environment_variable.value
+                coverage["matched_context_samples"] = sum(
+                    sid in context or sid in supplements for sid in by_target
+                )
                 for sid, members in by_target.items():
                     source = context.get(sid)
                     value = source.get(field) if source else None
+                    supplement = supplements.get(sid) if not finite(value) else None
+                    if supplement is not None:
+                        value = supplement["value"]
+                        supplemental_used += int(finite(value))
                     values = [s["families"].get(query.pfam_accession) for s in members]
                     denominators = [s["taxon_value_sum"] for s in members]
                     # 任一技术记录缺家族不能用其他记录覆盖；缺失不按生物学零处理。
@@ -102,6 +128,18 @@ class FunctionEnvironmentService:
                             mapping_evidence=[
                                 mappings[s["sample_name"]]["evidence"] for s in members
                             ],
+                            environment_source="sample_environment"
+                            if supplement is not None
+                            else "context_stat",
+                            environment_evidence=supplement["evidence"]
+                            if supplement is not None
+                            else None,
+                            environment_method=supplement["method"]
+                            if supplement is not None
+                            else None,
+                            environment_context_details=supplement["context_details"]
+                            if supplement is not None
+                            else None,
                         )
                     )
                 stats = [
@@ -136,7 +174,8 @@ class FunctionEnvironmentService:
                         "matou_taxonomy",
                         "matou_pfam",
                         "matou_" + query.assay.lower(),
-                    ],
+                    ]
+                    + (["research_sample_environment"] if supplemental_used else []),
                     sample_count=coverage["valid_statistical_samples"],
                     excluded_sample_count=len(names) - coverage["mapped"],
                     filters={
@@ -159,6 +198,11 @@ class FunctionEnvironmentService:
                             "sum_numerators_and_denominators_per_explicit_PANGAEA_sample"
                         ),
                         "denominator": "all_provided_taxon_gene_signal_including_unannotated",
+                        "sample_environment_source": supplemental_source,
+                        "supplemental_environment_values_used": supplemental_used,
+                        "environment_merge": (
+                            "retain_finite_core_value; exact_sample_ID_only; require_equal_units"
+                        ),
                     },
                 ),
                 warnings=[
@@ -168,8 +212,18 @@ class FunctionEnvironmentService:
                     ),
                     ResultWarning(
                         code="statistical_scope",
-                        message="双侧Spearman置换检验；一个PANGAEA样本一行。跨站位相关不证明因果；未校正其他环境混杂。",
+                        message="双侧Spearman置换检验；一个PANGAEA样本一行。相关仅作探索，不证明因果；未校正建库方法、航次、站位重复及其他环境混杂，须按已核实方法分层核验。",
                     ),
-                ],
+                ]
+                + (
+                    [
+                        ResultWarning(
+                            code="supplemental_environment_context",
+                            message="部分环境值来自按确切样本ID核验的补充资料；测量方法、统计口径和时空间隔见逐点证据，不等同于同步水样实测。",
+                        )
+                    ]
+                    if supplemental_used
+                    else []
+                ),
             ),
         )

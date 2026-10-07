@@ -209,26 +209,3 @@ pnpm build
 ## 5. 协同开发约定
 
 开始修改前阅读 [开发指南](AGENTS.md) 和 [项目方案](tara-agent方案文档.md)。后端结构与数据处理细节见 [后端说明](backend/README.md)，前端展示职责见 [前端说明](frontend/README.md)。
-
-### 使用 AI 编程工具时接入 AOCI
-
-AOCI 帮助 AI 编程工具读取和维护项目结构说明，不是启动应用所需的服务。本仓库使用 AOCI-CODE `v0.1.0-rc14`。
-
-首次在本机接入 Codex 时，按[安装说明](https://github.com/aoci-spec/aoci-code/blob/v0.1.0-rc14/docs/install.md)安装并校验同版本程序，在项目根目录执行以下命令。将占位路径替换为本机 AOCI 程序的完整路径；PowerShell 的 `&` 用于运行该路径下的程序。
-
-```powershell
-# 为本机 Codex 配置 AOCI 连接。
-& '<本机 AOCI 程序完整路径>' --repo . init --agent codex
-
-# 检查共享索引文件的结构是否正确。
-& '<本机 AOCI 程序完整路径>' --repo . verify --json
-
-# 检查索引是否与当前仓库内容一致。
-& '<本机 AOCI 程序完整路径>' --repo . check --json
-```
-
-使用其他 AI 编程工具时，按[集成说明](https://github.com/aoci-spec/aoci-code/blob/v0.1.0-rc14/docs/agent-integrations.md)选择对应配置。配置完成后，若会话未加载 AOCI 工具，刷新或重新打开项目。
-
-仓库共享 `AGENTS.md`、三个 `aoci*.txt` 文件，以及 `.aoci/` 中被其忽略规则允许提交的配置、基线和决策文件。本机连接配置、运行日志、草稿与恢复记录不提交。
-
-修改完成后，由 Agent 按 `AGENTS.md` 更新受影响的索引条目；提交前一起检查代码和 AOCI 文件的改动。索引冲突或与代码不一致时，让 Agent 按 AOCI 当前返回的处理指引修复，不手改基线中的校验值，不强制重建基线。

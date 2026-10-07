@@ -1,0 +1,158 @@
+[
+  {
+    "tool": "community_analysis",
+    "status": "completed",
+    "sections": [
+      {
+        "figure": "v4:distribution",
+        "output": "distribution",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "v4:diversity",
+        "output": "diversity",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "v4:association",
+        "output": "association",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "v4:ordination",
+        "output": "ordination",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "v9:distribution",
+        "output": "distribution",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "v9:diversity",
+        "output": "diversity",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "v9:association",
+        "output": "association",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "v9:ordination",
+        "output": "ordination",
+        "status": "completed",
+        "reason": null
+      }
+    ],
+    "mapping_coverage": null,
+    "warnings": [
+      {
+        "code": "method_scope",
+        "message": "V4/V9独立计算；测序信号不等于细胞数；Shannon未稀释。零目标库多样性未定义。",
+        "details": {}
+      },
+      {
+        "code": "statistical_scope",
+        "message": "相关采用双侧置换检验和BH校正；PLS仅描述。站位/水层/粒径观测并非必然独立，未经设计验证不能推断因果。",
+        "details": {}
+      },
+      {
+        "code": "ordination_method",
+        "message": "NMDS采用固定种子单调SMACOF、Bray–Curtis和Stress1；不声称与vegan metaMDS的随机坐标、自动转换或论文stress完全一致。",
+        "details": {}
+      }
+    ]
+  },
+  {
+    "tool": "function_study",
+    "status": "completed",
+    "sections": [
+      {
+        "figure": "9a",
+        "output": "功能排名与相对转录贡献",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "9b",
+        "output": "粒径分配",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "9c",
+        "output": "海区分配",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "10b",
+        "output": "DUF285环境关联",
+        "status": "completed",
+        "reason": null
+      },
+      {
+        "figure": "10e",
+        "output": "LHC亚家族环境关联",
+        "status": "completed",
+        "reason": null
+      }
+    ],
+    "mapping_coverage": null,
+    "warnings": [
+      {
+        "code": "paper_denominator_difference",
+        "message": "论文图注称以硅藻总转录信号为分母；作者图9脚本以筛选后Pfam汇总信号归一化。当前榜单按全部已提供硅藻基因信号归一化后等权平均，保留功能不再二次归一化。",
+        "details": {}
+      },
+      {
+        "code": "nonexclusive_domains",
+        "message": "功能合并沿用作者对Pfam信号求和的规则；共享基因与多结构域不分摊，不能解释为互斥基因组成、蛋白活性或RNA/DNA活性。",
+        "details": {}
+      },
+      {
+        "code": "reference_scope",
+        "message": "paper_reference使用作者公开汇总表；current_data使用当前唯一gene–Pfam候选映射，仅保留DNA11/cDNA14。两者的结构域计数、样本范围和分母不同，不能声称精确复现。",
+        "details": {
+          "pfams_without_reference_name": 7
+        }
+      }
+    ]
+  },
+  {
+    "tool": "function_environment",
+    "status": "partial",
+    "sections": null,
+    "mapping_coverage": {
+      "selected": 581,
+      "mapped": 574,
+      "matched_context_samples": 574,
+      "valid_statistical_samples": 552
+    },
+    "warnings": [
+      {
+        "code": "candidate_relative_signal",
+        "message": "候选Pfam信号不等于蛋白活性；相对信号不等于绝对表达。缺失不补零。",
+        "details": {}
+      },
+      {
+        "code": "statistical_scope",
+        "message": "双侧Spearman置换检验；一个PANGAEA样本一行。相关仅作探索，不证明因果；未校正建库方法、航次、站位重复及其他环境混杂，须按已核实方法分层核验。",
+        "details": {}
+      },
+      {
+        "code": "supplemental_environment_context",
+        "message": "部分环境值来自按确切样本ID核验的补充资料；测量方法、统计口径和时空间隔见逐点证据，不等同于同步水样实测。",
+        "details": {}
+      }
+    ]
+  }
+]

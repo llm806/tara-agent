@@ -282,7 +282,10 @@ def test_mean_retains_positive_groups_without_annotation():
 
 
 @pytest.mark.anyio
-async def test_model_finish_does_not_override_blocked_scientific_section(cohort, service_settings):
+@pytest.mark.parametrize("termination", ["finish", "stop"])
+async def test_model_finish_does_not_override_blocked_scientific_section(
+    cohort, service_settings, termination
+):
     select_diatoms(cohort)
     reference_bundle(cohort / "paper_task2")
     gateway = MCPToolGateway(
@@ -305,6 +308,10 @@ async def test_model_finish_does_not_override_blocked_scientific_section(cohort,
                     rationale="调用科学计算工具。",
                     call={"tool_name": "function_study", "arguments": {"query": {}}},
                 )
+            if termination == "stop":
+                return AnalysisDecision(
+                    action="stop", rationale="后续比较暂时无法完成。", message="后续比较未完成。"
+                )
             return AnalysisDecision(
                 action="finish",
                 rationale="工具已返回。",
@@ -322,3 +329,10 @@ async def test_model_finish_does_not_override_blocked_scientific_section(cohort,
     assert response.result["status"] == "partial"
     assert "LHC" in response.result["stop_reason"]
     assert response.result["analysis_steps"][0]["result"]["function_ranks"]
+    # 模型未提供最终步骤编号时，工具的最终图表仍保留自身角色，受阻项目不造图。
+    assert response.result["analysis_steps"][0]["result_role"] == "intermediate"
+    assert response.charts
+    assert {chart.result_role for chart in response.charts} == {"final"}
+    assert {chart.artifact_key for chart in response.charts} >= {
+        "function_ranks", "size_distribution", "ocean_distribution"
+    }

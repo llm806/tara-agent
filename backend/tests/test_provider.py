@@ -135,6 +135,7 @@ async def test_planner_uses_required_function_call_with_mcp_schema() -> None:
         [],
         [tool_call("find_samples", "not-json")],
         [tool_call("run_sql", '{"sql":"select 1"}')],
+        [tool_call("function_study", '{"query":{}}')],
     ],
 )
 async def test_planner_rejects_unusable_function_calls(calls: list[Any]) -> None:
@@ -187,7 +188,11 @@ async def test_answer_streams_reasoning_and_content_as_separate_deltas() -> None
     ]
     assert completions.request["stream"] is True
     assert completions.request["stream_options"] == {"include_usage": True}
-    assert completions.request["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in completions.request
+    assert completions.request["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert model.trace_parameters["answer"]["thinking"] == "disabled"
+    assert "reasoning_effort" not in model.trace_parameters["answer"]
+    assert completions.request["max_tokens"] == 65536
     assert completions.request["max_tokens"] == model.trace_parameters["answer"]["max_tokens"]
     user_content = json.loads(completions.request["messages"][1]["content"])
     assert user_content["question"] == "找一个样本"
@@ -211,7 +216,8 @@ async def test_model_usage_is_returned_without_estimation() -> None:
         [tool_call("find_samples", '{"query":{"limit":1}}')],
         usage=usage,
     )
-    plan = await model_with(planner).plan("找一个样本", ConversationContext(), [])
+    tools = [ToolDefinition(name=ToolName.FIND_SAMPLES, description="样本查询", input_schema={})]
+    plan = await model_with(planner).plan("找一个样本", ConversationContext(), tools)
     assert plan.usage is not None
     assert plan.usage.model_dump() == {
         "input_tokens": 120,

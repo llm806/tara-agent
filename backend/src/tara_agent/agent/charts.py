@@ -114,6 +114,7 @@ def _function_study_charts(result):
         ChartSpec(
             kind=ChartKind.HORIZONTAL_BAR,
             title=f"图9a对照 · {source} · Top {len(ranks)} 功能相对转录贡献",
+            artifact_key="function_ranks",
             x=[r["function_name"] for r in ranks],
             y=[r["relative_contribution"] for r in ranks],
             labels=[r["function_id"] for r in ranks],
@@ -136,11 +137,12 @@ def _function_study_charts(result):
             ChartSpec(
                 kind=ChartKind.STACKED_BAR,
                 title=f"图{figure}对照 · {source} · Top {len(ranks)} 功能{label}分配",
+                artifact_key=key,
                 x=[r["function_name"] for r in ranks],
                 y=[],
                 labels=[],
                 x_label="已映射信号内分配比例",
-                y_label="功能（同图9a顺序）",
+                y_label="功能（按排名排序）",
                 series=[
                     {
                         "name": group,
@@ -157,6 +159,7 @@ def _function_study_charts(result):
         charts.append(
             ChartSpec(
                 kind=ChartKind.CORRELATION_CIRCLE,
+                artifact_key="pls_results",
                 title=(
                     f"图{p['figure']}对照 · {source} · {p['target']} "
                     f"环境PLS相关圆（{p['sample_count']}组）"

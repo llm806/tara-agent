@@ -627,7 +627,10 @@ class TaraAgent:
                     chart.model_copy(
                         update={
                             "title": f"步骤 {record['step_id']} · {chart.title}",
-                            "result_role": record["result_role"],
+                            # 工具明确标记的最终产物不随外层步骤降为中间结果。
+                            "result_role": record["result"].get("artifact_roles", {}).get(
+                                chart.artifact_key, record["result_role"]
+                            ),
                         }
                     )
                 )
@@ -1041,4 +1044,6 @@ def _selected_tool_resource(
     for tool, resource in zip(tools, resources, strict=True):
         if tool.name is plan.tool_name:
             return resource
-    raise ValueError(f"工具资源不存在: {plan.tool_name.value}")
+    raise AgentToolError(
+        f"当前数据服务未启用工具 {plan.tool_name.value}，请检查服务器数据配置。"
+    )
