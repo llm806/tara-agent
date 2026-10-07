@@ -35,7 +35,9 @@ yarn-error.log*
 # Tara source and derived data
 # Source datasets are local, read-only inputs and must never be committed.
 Tara_4_Core_Datasets/
+TaraData/
 backend/data/processed/
+*.dump
 
 # Local reference documents
 *.docx
@@ -53,9 +55,11 @@ Thumbs.db
 *.md
 !/README.md
 !backend/README.md
+!backend/RESEARCH_TASKS.md
 !frontend/README.md
 !/AGENTS.md
 !/tara-agent方案文档.md
+!deploy/README.md
 
 .codex-reference/
 

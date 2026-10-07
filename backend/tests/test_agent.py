@@ -11,6 +11,7 @@ from tara_agent.agent import AgentModel
 from tara_agent.agent.gateway import MCPToolGateway
 from tara_agent.agent.graph import TaraAgent
 from tara_agent.agent.models import (
+    CORE_TOOLS,
     AnalysisReference,
     ConversationContext,
     ConversationMessage,
@@ -91,7 +92,7 @@ class RepresentativeModel(AgentModel):
         context: ConversationContext,
         tools: list[ToolDefinition],
     ) -> RouteDecision:
-        assert {tool.name for tool in tools} == set(ToolName)
+        assert {tool.name for tool in tools} == CORE_TOOLS
         self.route_context = context
         if question in self.plans:
             analysis_reference_ids = []
@@ -152,7 +153,7 @@ class RepresentativeModel(AgentModel):
         context: ConversationContext,
         tools: list[ToolDefinition],
     ) -> ToolPlan:
-        assert {tool.name for tool in tools} == set(ToolName)
+        assert {tool.name for tool in tools} == CORE_TOOLS
         self.plan_context = context
         self.plan_call_count += 1
         return self.plans[question].model_copy(
@@ -263,6 +264,7 @@ async def test_stream_exposes_steps_answer_deltas_then_complete(tara_agent: Tara
         "step",
         "step",
         "step",
+        "answer_delta",
         "reasoning_delta",
         "answer_delta",
         "answer_delta",
@@ -278,6 +280,7 @@ async def test_stream_exposes_steps_answer_deltas_then_complete(tara_agent: Tara
     )
     assert streamed_reasoning == events[-1].response.reasoning
     assert streamed_answer == events[-1].response.answer
+    assert streamed_answer.startswith("【最终结果】")
 
 
 @pytest.mark.anyio
@@ -296,6 +299,8 @@ async def test_execution_stream_exposes_langgraph_task_lifecycle(
     assert [(event.node_name, event.phase) for event in tasks] == [
         ("route", "started"),
         ("route", "completed"),
+        ("select_workflow", "started"),
+        ("select_workflow", "completed"),
         ("understand", "started"),
         ("understand", "completed"),
         ("execute", "started"),

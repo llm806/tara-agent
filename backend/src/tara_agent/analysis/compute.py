@@ -11,6 +11,11 @@ import numpy as np
 import polars as pl
 from scipy.stats import entropy, spearmanr
 
+from tara_agent.analysis.abundance_details import (
+    TAXONOMY_LAYOUT,
+    sample_composition,
+    station_abundance,
+)
 from tara_agent.analysis.compute_models import (
     DiversityGroupSummary,
     DiversityObservation,
@@ -60,6 +65,25 @@ class TaraComputeService:
         observations = calculation.observations
         if not query.include_zero_samples:
             observations = [item for item in observations if item.taxon_read_count > 0]
+        if query.order_by == "relative_abundance":
+            observations = sorted(
+                observations,
+                key=lambda o: (
+                    o.relative_abundance is None,
+                    -(o.relative_abundance or 0),
+                    o.sample_id,
+                ),
+            )
+        groups, missing_station = (
+            station_abundance(self.reader, observations, query.aggregation)
+            if query.group_by
+            else ([], [])
+        )
+        composition, composition_summaries = (
+            sample_composition(self.reader, query, observations)
+            if query.taxonomic_rank
+            else ([], [])
+        )
 
         total = len(observations)
         page_items = observations[query.offset : query.offset + query.limit]
@@ -68,6 +92,32 @@ class TaraComputeService:
             selection.unavailable_for_marker,
             calculation.zero_library_samples,
         )
+        if query.group_by:
+            warnings.append(
+                ResultWarning(
+                    code="station_descriptive_aggregation",
+                    message="站点均值为有效样本相对丰度的等权平均，最大值为最高样本值；不同水层和粒径合并仅作描述，不是独立重复或站点绝对丰度。",
+                )
+            )
+        if missing_station:
+            warnings.append(
+                ResultWarning(
+                    code="missing_station_excluded",
+                    message="缺少站点标识的样本未参与站点汇总。",
+                    details={"sample_ids": missing_station},
+                )
+            )
+        if query.taxonomic_rank:
+            warnings.append(
+                ResultWarning(
+                    code="taxonomy_assignment_limit",
+                    message="属/种名称来自原始分类注释；截短、占位或不支持的层级保留为未鉴定。未按置信度剔除；测序信号不证明种鉴定或细胞丰度。组成分别给出全样本占比和所选类群内部占比。",
+                    details={
+                        "taxonomy_layout": TAXONOMY_LAYOUT,
+                        "pagination": "offset/limit independently per sample",
+                    },
+                )
+            )
         excluded = selection.marker_sample_count - len(selection.selected)
         excluded += len(calculation.observations) - len(observations)
 
@@ -78,9 +128,22 @@ class TaraComputeService:
             observations=page_items,
             page=Page(offset=query.offset, limit=query.limit, total=total),
             matching_asv_count=calculation.matching_asv_count,
+            group_by=query.group_by,
+            aggregation=query.aggregation if query.group_by else None,
+            groups=groups[query.offset : query.offset + query.limit],
+            station_leaders=self._station_leaders(groups),
+            group_page=Page(offset=query.offset, limit=query.limit, total=len(groups))
+            if query.group_by
+            else None,
+            taxonomic_rank=query.taxonomic_rank,
+            composition=composition,
+            composition_summaries=composition_summaries,
             metadata=ResultMetadata(
                 provenance=DataProvenance(
-                    source_datasets=[f"18s_{query.marker.value}"],
+                    source_datasets=[
+                        f"18s_{query.marker.value}",
+                        *(["context_general"] if query.group_by else []),
+                    ],
                     marker=query.marker,
                     sample_count=total,
                     excluded_sample_count=excluded,
@@ -88,18 +151,40 @@ class TaraComputeService:
                         "taxon": query.taxon,
                         "match_mode": query.match_mode.value,
                         "include_zero_samples": query.include_zero_samples,
+                        "sample_ids": query.sample_ids,
+                        "order_by": query.order_by,
+                        "group_by": query.group_by,
+                        "aggregation": query.aggregation if query.group_by else None,
+                        "taxonomic_rank": query.taxonomic_rank,
+                        "offset": query.offset,
+                        "limit": query.limit,
                     },
                 ),
                 warnings=warnings,
             ),
         )
 
+    @staticmethod
+    def _station_leaders(groups):
+        # 先在完整范围取两种统计的最高站点，避免分页或模型摘要遗漏另一套排名的首位。
+        leaders = {}
+        for statistic in ("mean", "max"):
+            first = next(
+                (
+                    row
+                    for row in sorted(groups, key=lambda row: row.station)
+                    if getattr(row, f"{statistic}_rank") == 1
+                ),
+                None,
+            )
+            if first is not None:
+                leaders[first.station] = first
+        return list(leaders.values())
+
     def diversity_analysis(self, query: DiversityQuery) -> DiversityResult:
         selection = self._resolve_samples(query.marker, query.sample_ids)
         amplicons, matching_asv_count = self._diversity_amplicons(query)
-        observations = self._calculate_diversity(
-            query.marker, selection.selected, amplicons
-        )
+        observations = self._calculate_diversity(query.marker, selection.selected, amplicons)
         groups, group_warnings = self._summarize_diversity_groups(
             observations, query.group_by.value if query.group_by else None
         )
@@ -128,9 +213,7 @@ class TaraComputeService:
             warnings.append(
                 ResultWarning(
                     code="zero_reads_in_analysis_set",
-                    message=(
-                        "所选 ASV 集合的测序读数为零时，Shannon 指数没有定义。"
-                    ),
+                    message=("所选 ASV 集合的测序读数为零时，Shannon 指数没有定义。"),
                     details={"sample_ids": zero_read_samples},
                 )
             )
@@ -227,9 +310,7 @@ class TaraComputeService:
             ),
         )
 
-    def _resolve_samples(
-        self, marker: Marker, requested: list[str] | None
-    ) -> _SampleSelection:
+    def _resolve_samples(self, marker: Marker, requested: list[str] | None) -> _SampleSelection:
         marker_samples = set(self.reader.marker_sample_ids(marker))
         if requested is None:
             return _SampleSelection(sorted(marker_samples), [], len(marker_samples))
@@ -278,9 +359,7 @@ class TaraComputeService:
             if matching_ids.is_empty():
                 taxon_totals = dict.fromkeys(batch, 0)
             else:
-                matching = abundance.filter(
-                    pl.col("amplicon").is_in(matching_ids.implode())
-                )
+                matching = abundance.filter(pl.col("amplicon").is_in(matching_ids.implode()))
                 taxon_totals = self._column_sums(matching, batch)
 
             for sample in batch:
@@ -307,13 +386,9 @@ class TaraComputeService:
             zero_library_samples=zero_libraries,
         )
 
-    def _diversity_amplicons(
-        self, query: DiversityQuery
-    ) -> tuple[pl.Series | None, int]:
+    def _diversity_amplicons(self, query: DiversityQuery) -> tuple[pl.Series | None, int]:
         if query.taxon is None:
-            count = self.reader.manifest.artifacts[
-                f"{query.marker.value}_metadata"
-            ].row_count
+            count = self.reader.manifest.artifacts[f"{query.marker.value}_metadata"].row_count
             return None, count
 
         amplicon_query = (
@@ -351,9 +426,7 @@ class TaraComputeService:
                 streaming=True,
             )
             if amplicons is not None:
-                abundance = abundance.filter(
-                    pl.col("amplicon").is_in(amplicons.implode())
-                )
+                abundance = abundance.filter(pl.col("amplicon").is_in(amplicons.implode()))
             counts = abundance.select(batch).to_numpy()
             total_reads = counts.sum(axis=0, dtype=np.uint64)
             observed = (counts > 0).sum(axis=0)
@@ -388,9 +461,7 @@ class TaraComputeService:
         context = self.reader.load_sample_context(sample_ids).select(
             "sample_id_pangaea", group_field
         )
-        group_by_sample = {
-            row["sample_id_pangaea"]: row[group_field] for row in context.to_dicts()
-        }
+        group_by_sample = {row["sample_id_pangaea"]: row[group_field] for row in context.to_dicts()}
         grouped: dict[str, list[DiversityObservation]] = defaultdict(list)
         missing = 0
         for observation in observations:
@@ -440,12 +511,8 @@ class TaraComputeService:
             return [], 0
         sample_ids = [item.sample_id for item in observations]
         field = query.environment_variable.value
-        context = self.reader.load_sample_context(sample_ids).select(
-            "sample_id_pangaea", field
-        )
-        environment = {
-            row["sample_id_pangaea"]: row[field] for row in context.to_dicts()
-        }
+        context = self.reader.load_sample_context(sample_ids).select("sample_id_pangaea", field)
+        environment = {row["sample_id_pangaea"]: row[field] for row in context.to_dicts()}
 
         points: list[EnvironmentAssociationPoint] = []
         missing = 0
@@ -472,34 +539,46 @@ class TaraComputeService:
     ) -> tuple[float | None, float | None, list[ResultWarning]]:
         sample_count = len(points)
         if sample_count < MIN_CORRELATION_SAMPLES:
-            return None, None, [
-                ResultWarning(
-                    code="insufficient_samples",
-                    message="Spearman 相关性计算至少需要三个数据完整的样本。",
-                    details={"sample_count": sample_count},
-                )
-            ]
+            return (
+                None,
+                None,
+                [
+                    ResultWarning(
+                        code="insufficient_samples",
+                        message="Spearman 相关性计算至少需要三个数据完整的样本。",
+                        details={"sample_count": sample_count},
+                    )
+                ],
+            )
 
         environment = [item.environment_value for item in points]
         abundance = [item.relative_abundance for item in points]
         if len(set(environment)) < 2 or len(set(abundance)) < 2:
-            return None, None, [
-                ResultWarning(
-                    code="constant_input",
-                    message="输入值全部相同时，Spearman 相关系数没有定义。",
-                )
-            ]
+            return (
+                None,
+                None,
+                [
+                    ResultWarning(
+                        code="constant_input",
+                        message="输入值全部相同时，Spearman 相关系数没有定义。",
+                    )
+                ],
+            )
 
         result = spearmanr(environment, abundance, nan_policy="raise", alternative="two-sided")
         rho = float(result.statistic)
         p_value = float(result.pvalue)
         if not math.isfinite(rho) or not math.isfinite(p_value):
-            return None, None, [
-                ResultWarning(
-                    code="undefined_correlation",
-                    message="Spearman 相关性计算未得到有限数值结果。",
-                )
-            ]
+            return (
+                None,
+                None,
+                [
+                    ResultWarning(
+                        code="undefined_correlation",
+                        message="Spearman 相关性计算未得到有限数值结果。",
+                    )
+                ],
+            )
 
         warnings: list[ResultWarning] = []
         if sample_count <= ASYMPTOTIC_P_VALUE_SAMPLE_THRESHOLD:
@@ -524,9 +603,9 @@ class TaraComputeService:
     def _column_sums(frame: pl.DataFrame, columns: list[str]) -> dict[str, int]:
         if frame.is_empty():
             return dict.fromkeys(columns, 0)
-        values = frame.select(
-            [pl.col(column).cast(pl.UInt64).sum() for column in columns]
-        ).row(0, named=True)
+        values = frame.select([pl.col(column).cast(pl.UInt64).sum() for column in columns]).row(
+            0, named=True
+        )
         return {column: int(value or 0) for column, value in values.items()}
 
     def _abundance_warnings(
@@ -539,8 +618,7 @@ class TaraComputeService:
             ResultWarning(
                 code="read_count_is_not_cell_abundance",
                 message=(
-                    "原始测序读数及据此计算的相对丰度属于测序信号，"
-                    "不是对细胞丰度的直接测量。"
+                    "原始测序读数及据此计算的相对丰度属于测序信号，不是对细胞丰度的直接测量。"
                 ),
             )
         ]

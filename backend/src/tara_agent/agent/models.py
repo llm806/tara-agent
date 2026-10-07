@@ -19,6 +19,28 @@ class ToolName(StrEnum):
     TAXON_ABUNDANCE = "taxon_abundance"
     DIVERSITY_ANALYSIS = "diversity_analysis"
     ENVIRONMENT_ASSOCIATION = "environment_association"
+    COMMUNITY_ANALYSIS = "community_analysis"
+    FUNCTION_ENVIRONMENT = "function_environment"
+    FIND_FUNCTION_SAMPLES = "find_function_samples"
+    FUNCTION_PROFILE = "function_profile"
+    FUNCTION_ATLAS = "function_atlas"
+    FUNCTION_STUDY = "function_study"
+    COMPARE_FUNCTION_SIGNALS = "compare_function_signals"
+    RETRIEVE_GENE_SEQUENCES = "retrieve_gene_sequences"
+
+
+MATOU_TOOLS = frozenset(
+    {
+        ToolName.FUNCTION_ENVIRONMENT,
+        ToolName.FIND_FUNCTION_SAMPLES,
+        ToolName.FUNCTION_PROFILE,
+        ToolName.FUNCTION_ATLAS,
+        ToolName.FUNCTION_STUDY,
+        ToolName.COMPARE_FUNCTION_SIGNALS,
+        ToolName.RETRIEVE_GENE_SEQUENCES,
+    }
+)
+CORE_TOOLS = frozenset(ToolName) - MATOU_TOOLS
 
 
 class ToolDefinition(BaseModel):
@@ -89,6 +111,14 @@ class AnalysisCapability(StrEnum):
     TAXON_ABUNDANCE = "taxon_abundance"
     DIVERSITY_ANALYSIS = "diversity_analysis"
     ENVIRONMENT_ASSOCIATION = "environment_association"
+    COMMUNITY_ANALYSIS = "community_analysis"
+    FUNCTION_ENVIRONMENT = "function_environment"
+    FUNCTION_SAMPLE_QUERY = "function_sample_query"
+    FUNCTION_PROFILE = "function_profile"
+    FUNCTION_ATLAS = "function_atlas"
+    FUNCTION_STUDY = "function_study"
+    FUNCTION_COMPARISON = "function_comparison"
+    GENE_SEQUENCES = "gene_sequences"
 
 
 class RouteDecision(BaseModel):
@@ -156,6 +186,11 @@ class ChartKind(StrEnum):
     SAMPLE_MAP = "sample_map"
     BAR = "bar"
     SCATTER = "scatter"
+    HORIZONTAL_BAR = "horizontal_bar"
+    STACKED_BAR = "stacked_bar"
+    CORRELATION_CIRCLE = "correlation_circle"
+    ORDINATION = "ordination"
+    HEATMAP = "heatmap"
 
 
 class ChartSpec(BaseModel):
@@ -170,6 +205,8 @@ class ChartSpec(BaseModel):
     labels: list[str] = Field(default_factory=list)
     x_label: str
     y_label: str
+    series: list[dict[str, Any]] = Field(default_factory=list)
+    result_role: Literal["intermediate", "final"] = "final"
 
 
 class ToolTrace(BaseModel):

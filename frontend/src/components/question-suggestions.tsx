@@ -9,6 +9,7 @@ import {
   Lightbulb,
   Map as MapIcon,
   RefreshCw,
+  Workflow,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -22,6 +23,30 @@ const categoryIcons = {
   "丰度分布": BarChart3,
   "多样性比较": Database,
   "环境关联": FlaskConical,
+  "候选功能谱": Braces,
+  "候选条件敏感性": Workflow,
+  "丰度与环境核查": Workflow,
+  "V4 / V9 趋势比较": Workflow,
+};
+
+const taskLabels: Record<QuestionSuggestion["task_type"], string> = {
+  data_query: "数据检索",
+  statistical_analysis: "统计分析",
+  function_analysis: "候选功能分析",
+  multi_step_analysis: "多步骤分析",
+  research_discussion: "结果与方法讨论",
+  literature_review: "资料研读",
+};
+
+const datasetLabels: Record<string, string> = {
+  context_general: "context_general.tsv",
+  context_stat: "context_stat.tsv",
+  "18s_v4": "TARA-Oceans_18S-V4_dada2_table.tsv",
+  "18s_v9": "TARA-Oceans_18S-V9_dada2_table.tsv",
+  matou_taxonomy: "MATOU-v1.5.taxonomy.tsv.gz",
+  matou_pfam: "MATOU-v1.5.pfam.gz",
+  matou_metag: "MATOU-v1.5.metaG.occurrences.gz",
+  matou_metat: "MATOU-v1.5.metaT.occurrences.gz",
 };
 
 type QuestionSuggestionsProps = {
@@ -90,10 +115,14 @@ export function QuestionSuggestions({ onSelect }: QuestionSuggestionsProps) {
           className="suggestion-refresh"
           type="button"
           disabled={loading}
+          aria-label={loading ? "正在更新推荐问题" : "换一批推荐问题"}
+          aria-busy={loading}
           onClick={() => void refresh()}
         >
-          <RefreshCw className={loading ? "spin" : undefined} size={15} aria-hidden="true" />
-          换一批
+          <span className="suggestion-refresh-icon">
+            <RefreshCw className={loading ? "spin" : undefined} size={18} aria-hidden="true" />
+          </span>
+          <span aria-live="polite">{loading ? "正在更新" : "换一批问题"}</span>
         </button>
       </div>
       {error && items.length > 0 ? <p className="suggestion-inline-error">{error}</p> : null}
@@ -111,18 +140,39 @@ export function QuestionSuggestions({ onSelect }: QuestionSuggestionsProps) {
             : items.map((item) => {
                 const Icon = categoryIcons[item.category as keyof typeof categoryIcons] ?? Lightbulb;
                 return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => void onSelect(item.question)}
-                  >
-                    <span className="example-card-label">
-                      <Icon size={16} aria-hidden="true" />
-                      {item.category}
-                    </span>
-                    <span className="example-card-question">{item.question}</span>
-                  </button>
+                  <article className="example-card" key={item.id}>
+                    <button
+                      className="example-question-button"
+                      type="button"
+                      disabled={loading || item.availability === "planned"}
+                      onClick={() => void onSelect(item.question)}
+                    >
+                      <span className="example-card-heading">
+                        <span className="example-card-label">
+                          <Icon size={16} aria-hidden="true" />
+                          {item.category}
+                        </span>
+                        <span className={`example-task-badge ${item.task_type}`}>
+                          {taskLabels[item.task_type] ?? "数据检索"}
+                        </span>
+                      </span>
+                      <span className="example-card-question">{item.question}</span>
+                    </button>
+                    <div className="example-data-details">
+                      <div className="example-data-heading">
+                        <Database size={14} aria-hidden="true" />
+                        涉及数据集（{item.datasets.length}）
+                      </div>
+                      <div className="example-datasets" aria-label="涉及的数据集">
+                        {item.datasets.map((dataset) => (
+                          <span className="example-dataset-chip" key={dataset} title={datasetLabels[dataset] ?? dataset}>
+                            {datasetLabels[dataset] ?? dataset}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    {item.limitation ? <p className="example-limitation">{item.limitation}</p> : null}
+                  </article>
                 );
               })}
         </div>

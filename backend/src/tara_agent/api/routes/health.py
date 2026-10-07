@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, Response, status
 from sqlalchemy.exc import SQLAlchemyError
 
 from tara_agent import __version__
+from tara_agent.agent.gateway import AgentToolError
 from tara_agent.api.schemas import DatasetStatus, HealthResponse
 from tara_agent.data.reader import ProcessedDataReader
 from tara_agent.persistence import Database
@@ -15,15 +16,22 @@ async def _health_response(request: Request) -> HealthResponse:
     reader: ProcessedDataReader | None = request.app.state.data_reader
     database: Database | None = request.app.state.database
     settings = request.app.state.settings
+    manifest = reader.manifest if reader is not None else None
+    remote_gateway = request.app.state.remote_gateway
+    if remote_gateway is not None:
+        try:
+            manifest = (await remote_gateway.get_status()).manifest
+        except AgentToolError:
+            manifest = None
 
     datasets: list[DatasetStatus] = []
-    if reader is not None:
-        for key, source in reader.manifest.sources.items():
+    if manifest is not None:
+        for key, source in manifest.sources.items():
             sample_count = 0
             if key == "18s_v4":
-                sample_count = reader.manifest.coverage.v4_samples
+                sample_count = manifest.coverage.v4_samples
             elif key == "18s_v9":
-                sample_count = reader.manifest.coverage.v9_samples
+                sample_count = manifest.coverage.v9_samples
             datasets.append(
                 DatasetStatus(
                     key=key,
@@ -38,15 +46,11 @@ async def _health_response(request: Request) -> HealthResponse:
                     invalid_sample_columns=[],
                 )
             )
-    data_ready = reader is not None
+    data_ready = manifest is not None
     database_ready = await _database_ready(database)
     agent_ready = request.app.state.agent is not None
     persistence_required = settings.environment != "test"
-    service_ready = (
-        data_ready
-        and agent_ready
-        and (database_ready or not persistence_required)
-    )
+    service_ready = data_ready and agent_ready and (database_ready or not persistence_required)
     return HealthResponse(
         status="ok" if service_ready else "degraded",
         service=settings.app_name,

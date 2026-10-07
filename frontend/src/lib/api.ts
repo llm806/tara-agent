@@ -12,15 +12,10 @@ import type {
   TraceSummary,
 } from "@/lib/types";
 
-const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-
-export const apiBaseUrl = configuredApiBaseUrl || defaultApiBaseUrl();
+export const apiBaseUrl = defaultApiBaseUrl();
 
 function defaultApiBaseUrl(): string {
-  if (typeof window === "undefined") {
-    return "http://localhost:8000";
-  }
-  return window.location.origin;
+  return typeof window === "undefined" ? "" : window.location.origin;
 }
 
 export class ApiError extends Error {

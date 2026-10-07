@@ -11,6 +11,7 @@ from openai import AsyncOpenAI, OpenAIError
 from tara_agent.agent.context import build_answer_model_input
 from tara_agent.agent.conversation import conversation_context_payload
 from tara_agent.agent.models import (
+    AnalysisCapability,
     ConversationContext,
     ModelStreamDelta,
     ModelUsage,
@@ -18,17 +19,31 @@ from tara_agent.agent.models import (
     ToolDefinition,
     ToolPlan,
 )
+from tara_agent.agent.multistep import AnalysisDecision, WorkflowSelection, bounded_evidence
 from tara_agent.agent.prompts import (
     ANSWER_SYSTEM_PROMPT,
+    MULTI_STEP_SYSTEM_PROMPT,
     PLANNER_SYSTEM_PROMPT,
     ROUTER_SYSTEM_PROMPT,
+    WORKFLOW_SELECTOR_SYSTEM_PROMPT,
 )
 from tara_agent.agent.resources import CAPABILITY_PROFILE
 from tara_agent.config import Settings
 
+# 思考内容也占输出额度，为复杂分析的最终解释保留足够空间。
+ANSWER_MAX_TOKENS = 8192
+
 
 class AgentModelError(RuntimeError):
     """语言模型返回无法使用的回复时抛出。"""
+
+
+class MultiToolPlanRequired(AgentModelError):
+    """单步规划返回多个白名单调用，需要交由有界多步骤流程重新规划。"""
+
+    def __init__(self, usage=None):
+        super().__init__("该请求需要多步骤分析")
+        self.usage = usage
 
 
 class AgentModel(Protocol):
@@ -92,8 +107,10 @@ class DeepSeekChatModel:
                 "max_tokens": 1_200,
                 "thinking": "disabled",
             },
+            "workflow_selector": {"max_tokens": 2_000, "thinking": "disabled"},
+            "multi_planner": {"max_tokens": 2_000, "thinking": "disabled"},
             "answer": {
-                "max_tokens": 4_000,
+                "max_tokens": ANSWER_MAX_TOKENS,
                 "reasoning_effort": self.reasoning_effort,
                 "thinking": "enabled",
             },
@@ -111,8 +128,7 @@ class DeepSeekChatModel:
                 "conversation_context": conversation_context_payload(context),
                 "capability_profile": CAPABILITY_PROFILE,
                 "available_tools": [
-                    {"name": tool.name.value, "description": tool.description}
-                    for tool in tools
+                    {"name": tool.name.value, "description": tool.description} for tool in tools
                 ],
             },
             ensure_ascii=False,
@@ -144,9 +160,7 @@ class DeepSeekChatModel:
             decision = RouteDecision.model_validate(values)
         except (AttributeError, TypeError, ValueError) as exc:
             raise AgentModelError("DeepSeek returned an invalid route decision") from exc
-        return decision.model_copy(
-            update={"usage": _model_usage(getattr(response, "usage", None))}
-        )
+        return decision.model_copy(update={"usage": _model_usage(getattr(response, "usage", None))})
 
     async def plan(
         self,
@@ -190,8 +204,12 @@ class DeepSeekChatModel:
             raise AgentModelError("DeepSeek planning request failed") from exc
 
         tool_calls = response.choices[0].message.tool_calls or []
+        if len(tool_calls) > 1 and all(
+            call.function.name in {tool.name.value for tool in tools} for call in tool_calls
+        ):
+            raise MultiToolPlanRequired(_model_usage(getattr(response, "usage", None)))
         if len(tool_calls) != 1:
-            raise AgentModelError("DeepSeek must select exactly one tool")
+            raise AgentModelError("模型未返回有效的分析工具，请重新提问。")
         tool_call = tool_calls[0]
         try:
             arguments = json.loads(tool_call.function.arguments)
@@ -204,6 +222,64 @@ class DeepSeekChatModel:
         except (TypeError, ValueError) as exc:
             raise AgentModelError("DeepSeek returned an invalid tool plan") from exc
 
+    async def select_workflow(self, question, context, tools) -> WorkflowSelection:
+        return await self._structured_decision(
+            "select_analysis_workflow",
+            WorkflowSelection,
+            WORKFLOW_SELECTOR_SYSTEM_PROMPT,
+            {
+                "question": question,
+                "context": conversation_context_payload(context),
+                "tools": [tool.model_dump(mode="json") for tool in tools],
+            },
+        )
+
+    async def next_analysis_step(self, question, context, tools, steps, budget) -> AnalysisDecision:
+        return await self._structured_decision(
+            "analysis_next_step",
+            AnalysisDecision,
+            MULTI_STEP_SYSTEM_PROMPT,
+            {
+                "question": question,
+                "context": conversation_context_payload(context),
+                "tools": [tool.model_dump(mode="json") for tool in tools],
+                "verified_steps": bounded_evidence(steps),
+                "remaining_budget": budget,
+            },
+        )
+
+    async def _structured_decision(self, name, contract, prompt, payload):
+        schema = contract.model_json_schema()
+        schema["properties"].pop("usage", None)
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.name,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ],
+                tools=[
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "description": prompt,
+                            "parameters": _schema_for_model(schema),
+                        },
+                    }
+                ],
+                tool_choice="required",
+                max_tokens=2000,
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+            calls = response.choices[0].message.tool_calls or []
+            if len(calls) != 1 or calls[0].function.name != name:
+                raise ValueError("需要且仅允许一个结构化决定")
+            decision = contract.model_validate(json.loads(calls[0].function.arguments))
+        except (OpenAIError, AttributeError, TypeError, ValueError) as exc:
+            raise AgentModelError("模型返回了无效的分析决定") from exc
+        return decision.model_copy(update={"usage": _model_usage(getattr(response, "usage", None))})
+
     async def stream_answer(
         self,
         question: str,
@@ -211,7 +287,17 @@ class DeepSeekChatModel:
         result: dict[str, Any],
     ) -> AsyncIterator[ModelStreamDelta]:
         user_content = json.dumps(
-            build_answer_model_input(question, plan.tool_name, result),
+            (
+                {
+                    "question": question,
+                    "tool_result": {
+                        **{k: v for k, v in result.items() if k != "analysis_steps"},
+                        "analysis_steps": bounded_evidence(result["analysis_steps"]),
+                    },
+                }
+                if "analysis_steps" in result
+                else build_answer_model_input(question, plan.tool_name, result)
+            ),
             ensure_ascii=False,
         )
         try:
@@ -221,19 +307,21 @@ class DeepSeekChatModel:
                     {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},
                 ],
-                max_tokens=4_000,
+                max_tokens=ANSWER_MAX_TOKENS,
                 reasoning_effort=self.reasoning_effort,
                 stream=True,
                 stream_options={"include_usage": True},
                 extra_body={"thinking": {"type": "enabled"}},
             )
             received_content = False
+            finish_reason = None
             async for chunk in stream:
                 usage = _model_usage(getattr(chunk, "usage", None))
                 if usage is not None:
                     yield ModelStreamDelta(kind="usage", usage=usage)
                 if not chunk.choices:
                     continue
+                finish_reason = getattr(chunk.choices[0], "finish_reason", None) or finish_reason
                 delta = chunk.choices[0].delta
                 reasoning = getattr(delta, "reasoning_content", None)
                 if reasoning:
@@ -244,6 +332,8 @@ class DeepSeekChatModel:
                     yield ModelStreamDelta(kind="answer", content=content)
         except OpenAIError as exc:
             raise AgentModelError("DeepSeek answer request failed") from exc
+        if finish_reason in {"length", "content_filter"}:
+            raise AgentModelError(f"DeepSeek answer was incomplete ({finish_reason})")
         if not received_content:
             raise AgentModelError("DeepSeek returned an empty answer")
 
@@ -297,14 +387,7 @@ def _route_function(analysis_reference_ids: list[str]) -> dict[str, Any]:
                         "type": "array",
                         "items": {
                             "type": "string",
-                            "enum": [
-                                "sample_query",
-                                "sample_details",
-                                "taxon_query",
-                                "taxon_abundance",
-                                "diversity_analysis",
-                                "environment_association",
-                            ],
+                            "enum": [capability.value for capability in AnalysisCapability],
                         },
                         "maxItems": 10,
                     },

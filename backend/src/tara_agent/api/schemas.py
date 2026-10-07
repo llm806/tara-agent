@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from tara_agent.agent.home_suggestions import TaskType
+
 
 class DatasetStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -43,6 +45,10 @@ class QuestionSuggestionResponse(BaseModel):
     id: str
     category: str
     question: str
+    task_type: TaskType = "data_query"
+    datasets: list[str] = Field(default_factory=list)
+    availability: Literal["available", "planned"] = "available"
+    limitation: str | None = None
 
 
 class QuestionSuggestionListResponse(BaseModel):

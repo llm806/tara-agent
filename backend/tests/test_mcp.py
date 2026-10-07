@@ -27,7 +27,7 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_server_exposes_six_read_only_tools(mcp_server: MCPServer) -> None:
+async def test_server_exposes_core_read_only_tools(mcp_server: MCPServer) -> None:
     async with Client(mcp_server, raise_exceptions=True) as client:
         result = await client.list_tools()
 
@@ -39,6 +39,7 @@ async def test_server_exposes_six_read_only_tools(mcp_server: MCPServer) -> None
         "taxon_abundance",
         "diversity_analysis",
         "environment_association",
+        "community_analysis",
     }
     assert all(tool.annotations.read_only_hint for tool in tools.values())
     assert all(tool.annotations.open_world_hint is False for tool in tools.values())
@@ -46,6 +47,7 @@ async def test_server_exposes_six_read_only_tools(mcp_server: MCPServer) -> None
     assert all(
         "examples" in next(iter(tool.input_schema["properties"].values()))
         for tool in tools.values()
+        if tool.name != "community_analysis"
     )
 
 

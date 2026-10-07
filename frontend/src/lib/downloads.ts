@@ -36,6 +36,18 @@ export function downloadCsv(rows: Array<Record<string, unknown>>, label: string)
   downloadBlob(blob, `${createDownloadName(label)}.csv`);
 }
 
+export function downloadFasta(rows: Array<Record<string, unknown>>, label: string): void {
+  const lines = rows.flatMap((row) => {
+    if (typeof row.header !== "string" || typeof row.sequence !== "string"
+      || !/^MATOU-v1\.5\.[1-9][0-9]*$/.test(row.header)
+      || !/^[ACGTRYSWKMBDHVN]+$/.test(row.sequence)) return [];
+    return [`>${row.header}`, ...(row.sequence.match(/.{1,80}/g) ?? [])];
+  });
+  if (lines.length === 0) return;
+  downloadBlob(new Blob([lines.join("\n") + "\n"], { type: "text/plain;charset=utf-8" }),
+    `${createDownloadName(label)}.fna`);
+}
+
 function collectColumns(rows: Array<Record<string, unknown>>): string[] {
   const columns: string[] = [];
   const seen = new Set<string>();

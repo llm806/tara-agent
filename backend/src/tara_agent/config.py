@@ -3,6 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,6 +29,10 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     dataset_dir: Path = PROJECT_ROOT / "Tara_4_Core_Datasets"
     processed_data_dir: Path = BACKEND_ROOT / "data" / "processed"
+    matou_data_dir: Path | None = None
+    data_service_url: str | None = None
+    data_service_token_file: Path | None = None
+    data_service_timeout_seconds: float = Field(default=120, gt=0, le=600)
     cors_origins: list[str] = ["http://localhost:3000"]
     deepseek_api_key: SecretStr | None = Field(
         default=None,
@@ -50,13 +55,35 @@ class Settings(BaseSettings):
     auth_guest_email: str = "guest@tara-agent.local"
     auth_guest_display_name: str = "游客共享空间"
 
-    @field_validator("dataset_dir", "processed_data_dir", mode="before")
+    @field_validator(
+        "dataset_dir",
+        "processed_data_dir",
+        "matou_data_dir",
+        "data_service_token_file",
+        mode="before",
+    )
     @classmethod
-    def resolve_project_path(cls, value: str | Path) -> Path:
+    def resolve_project_path(cls, value: str | Path | None) -> Path | None:
+        if value is None:
+            return None
         path = Path(value).expanduser()
         if not path.is_absolute():
             path = BACKEND_ROOT / path
         return path.resolve(strict=False)
+
+    @field_validator("data_service_url")
+    @classmethod
+    def validate_data_service_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("数据服务地址不能包含凭据、查询参数或片段")
+        if not parsed.hostname or parsed.scheme not in {"http", "https"}:
+            raise ValueError("数据服务地址必须为 HTTP 或 HTTPS 地址")
+        if parsed.scheme == "http" and parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            raise ValueError("HTTP 数据服务只能通过本机 SSH 隧道访问")
+        return value.rstrip("/")
 
     @field_validator("api_prefix")
     @classmethod
@@ -68,6 +95,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def keep_generated_data_outside_source_data(self) -> "Settings":
+        if self.matou_data_dir is not None and self.matou_data_dir.is_relative_to(self.dataset_dir):
+            raise ValueError("matou_data_dir must not be inside dataset_dir")
         try:
             self.processed_data_dir.relative_to(self.dataset_dir)
         except ValueError:
@@ -86,6 +115,14 @@ class Settings(BaseSettings):
         if url.startswith("postgresql+asyncpg://"):
             return url
         raise ValueError("数据库连接地址必须使用 postgresql:// 或 postgresql+asyncpg://")
+
+    def get_data_service_token(self) -> str:
+        if self.data_service_token_file is None:
+            raise ValueError("远程数据模式需要配置 TARA_DATA_SERVICE_TOKEN_FILE")
+        token = self.data_service_token_file.read_text(encoding="utf-8").strip()
+        if len(token) < 32:
+            raise ValueError("数据服务凭据文件无效")
+        return token
 
     @property
     def auth_cookie_secure(self) -> bool:

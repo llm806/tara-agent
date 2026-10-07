@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { deleteSession, deleteSessions, listSessions, updateSession } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
@@ -109,34 +110,8 @@ export function SessionSidebar({
     };
   }, [menuSessionId]);
 
-  useEffect(() => {
-    if (!deleteRequest) {
-      return;
-    }
-    function closeDialogWithEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !deleting) {
-        setDeleteRequest(undefined);
-        setDeleteError(undefined);
-      }
-    }
-    document.addEventListener("keydown", closeDialogWithEscape);
-    return () => document.removeEventListener("keydown", closeDialogWithEscape);
-  }, [deleteRequest, deleting]);
-
-  useEffect(() => {
-    if (!signOutRequested) {
-      return;
-    }
-    function closeDialogWithEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !signingOut) {
-        setSignOutRequested(false);
-      }
-    }
-    document.addEventListener("keydown", closeDialogWithEscape);
-    return () => document.removeEventListener("keydown", closeDialogWithEscape);
-  }, [signOutRequested, signingOut]);
-
   async function confirmSignOut() {
+    if (disabled || signingOut) return;
     setSigningOut(true);
     try {
       await signOut();
@@ -279,19 +254,21 @@ export function SessionSidebar({
 
   return (
     <aside className="sidebar">
-      <button
-        className="brand-block"
-        type="button"
-        onClick={onNewSession}
-        disabled={disabled}
-        aria-label="新建对话"
-      >
-        <div className="brand-mark" aria-hidden="true"><Waves size={21} /></div>
-        <div>
-          <strong>Tara Agent</strong>
-          <span>海洋数据分析</span>
-        </div>
-      </button>
+      <div className="sidebar-brand">
+        <button
+          className="brand-block"
+          type="button"
+          onClick={onNewSession}
+          disabled={disabled}
+          aria-label="新建对话"
+        >
+          <div className="brand-mark" aria-hidden="true"><Waves size={21} /></div>
+          <div>
+            <strong>Tara Agent</strong>
+            <span>海洋数据分析</span>
+          </div>
+        </button>
+      </div>
 
       <nav className="primary-nav" aria-label="主要导航">
         <button type="button" onClick={onNewSession} disabled={disabled}>
@@ -349,6 +326,15 @@ export function SessionSidebar({
               {selectedIds.size === sessions.length ? "取消全选" : "全选"}
             </button>
             <span>已选 {selectedIds.size} 个</span>
+            <button
+              className="session-delete-button"
+              type="button"
+              onClick={requestSelectedSessionsDeletion}
+              disabled={selectedIds.size === 0 || disabled || deleting}
+            >
+              {deleting ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}
+              删除{selectedIds.size > 0 ? ` ${selectedIds.size}` : ""}
+            </button>
           </div>
         ) : null}
 
@@ -477,17 +463,6 @@ export function SessionSidebar({
           </div>
         ) : null}
 
-        {managing ? (
-          <button
-            className="session-delete-button"
-            type="button"
-            onClick={requestSelectedSessionsDeletion}
-            disabled={selectedIds.size === 0 || disabled || deleting}
-          >
-            {deleting ? <LoaderCircle className="spin" size={14} /> : <Trash2 size={14} />}
-            删除{selectedIds.size > 0 ? ` ${selectedIds.size}` : ""}
-          </button>
-        ) : null}
       </section>
 
       <div className={`sidebar-account${user.is_guest ? " guest" : ""}`}>
@@ -497,9 +472,10 @@ export function SessionSidebar({
         </div>
         <button
           type="button"
+          disabled={disabled || signingOut}
           onClick={() => setSignOutRequested(true)}
           aria-label="退出登录"
-          title="退出登录"
+          title={disabled ? "请等待当前操作完成后退出登录" : "退出登录"}
         >
           <LogOut size={15} />
         </button>
@@ -568,36 +544,86 @@ function ConfirmationDialog({
   onCancel,
   onConfirm,
 }: ConfirmationDialogProps) {
-  return (
+  const portalRoot = typeof document === "undefined" ? null : document.body;
+  const layerRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!portalRoot) return;
+    const previousFocus = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    // Portal 脱离固定侧栏的层叠上下文；inert 阻止背景点击和键盘聚焦。
+    const background = [...portalRoot.children]
+      .filter((node): node is HTMLElement => node instanceof HTMLElement && node !== layerRef.current)
+      .map((node) => ({ node, inert: node.inert }));
+    background.forEach(({ node }) => { node.inert = true; });
+    document.body.style.overflow = "hidden";
+    cancelRef.current?.focus();
+    return () => {
+      background.forEach(({ node, inert }) => { node.inert = inert; });
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+    };
+  }, [portalRoot]);
+
+  if (!portalRoot) return null;
+
+  return createPortal(
     <div
+      ref={layerRef}
       className="confirmation-dialog-layer"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !busy) {
-          onCancel();
+        if (event.target === event.currentTarget && !busy) onCancel();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!busy) onCancel();
+        }
+        if (event.key === "Tab") {
+          const buttons = [...(dialogRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
+          const first = buttons[0];
+          const last = buttons[buttons.length - 1];
+          if (!first) {
+            event.preventDefault();
+            dialogRef.current?.focus();
+          } else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
         }
       }}
     >
-      <section
-        className="confirmation-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-      >
+    <section ref={dialogRef} className="confirmation-dialog" role="dialog" aria-modal="true"
+      aria-labelledby={titleId} aria-describedby={`${titleId}-description`} tabIndex={-1}>
+      <div className="confirmation-dialog-heading">
+        <div className={`confirmation-dialog-icon ${confirmStyle}`} aria-hidden="true">
+          {confirmStyle === "danger" ? <Trash2 size={22} /> : <LogOut size={22} />}
+        </div>
         <h2 id={titleId}>{title}</h2>
-        <p>{description}</p>
-        {note ? <span>{note}</span> : null}
-        {error ? <div className="confirmation-dialog-error">{error}</div> : null}
-        <footer>
-          <button type="button" onClick={onCancel} disabled={busy} autoFocus>
-            取消
-          </button>
-          <button className={confirmStyle} type="button" onClick={onConfirm} disabled={busy}>
-            {busy ? <LoaderCircle className="spin" size={15} /> : null}
-            {confirmLabel}
-          </button>
-        </footer>
-      </section>
-    </div>
+        <button className="confirmation-dialog-close" type="button" aria-label="关闭确认框"
+          onClick={onCancel} disabled={busy}><X size={20} /></button>
+      </div>
+      <p id={`${titleId}-description`}>{description}</p>
+      {note ? <span>{note}</span> : null}
+      {error ? <div className="confirmation-dialog-error" role="alert">{error}</div> : null}
+      <footer>
+        <button ref={cancelRef} type="button" onClick={onCancel} disabled={busy}>
+          取消
+        </button>
+        <button className={confirmStyle} type="button" onClick={onConfirm} disabled={busy}>
+          {busy ? <LoaderCircle className="spin" size={15} /> : null}
+          {confirmLabel}
+        </button>
+      </footer>
+    </section>
+    </div>,
+    portalRoot,
   );
 }
 

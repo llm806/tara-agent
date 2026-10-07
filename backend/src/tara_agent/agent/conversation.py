@@ -18,6 +18,7 @@ from tara_agent.agent.models import (
     RouteKind,
     ToolName,
 )
+from tara_agent.agent.multistep import bounded_evidence
 
 MAX_CONTEXT_MESSAGES = 8
 MAX_CONTEXT_CHARACTERS = 6_000
@@ -86,12 +87,10 @@ def conversation_context_payload(context: ConversationContext) -> dict[str, Any]
 
     return {
         "messages": [
-            {"role": message.role, "content": message.content}
-            for message in context.messages
+            {"role": message.role, "content": message.content} for message in context.messages
         ],
         "analysis_references": [
-            reference.model_dump(mode="json")
-            for reference in context.analysis_references
+            reference.model_dump(mode="json") for reference in context.analysis_references
         ],
     }
 
@@ -151,7 +150,44 @@ def build_analysis_reference(
     result = response_data.get("result")
     if not isinstance(question, str) or not question.strip():
         return None
-    if not isinstance(tool, dict) or not isinstance(result, dict):
+    if not isinstance(result, dict):
+        return None
+    summary = None
+    if result.get("workflow") == "multi_step":
+        steps = result.get("analysis_steps")
+        if not isinstance(steps, list) or not steps or not all(isinstance(s, dict) for s in steps):
+            return None
+        # 兼容现有引用契约：工具字段只标识最后一次实际成功调用，全部步骤另存摘要。
+        tool = {"name": steps[-1].get("tool_name"), "arguments": steps[-1].get("arguments")}
+        summary = {
+            "workflow": "multi_step",
+            "status": result.get("status"),
+            "stop_reason": result.get("stop_reason"),
+            "tool_field_scope": "last_successful_step_only",
+            "analysis_steps": [],
+        }
+        # 先去掉展示明细再分配历史预算，避免某张大表导致全部步骤结果被丢弃。
+        compact_steps = []
+        for step in steps:
+            try:
+                step_tool = ToolName(step.get("tool_name"))
+            except ValueError:
+                return None
+            step_result = step.get("result")
+            if not isinstance(step_result, dict):
+                return None
+            compact_steps.append(
+                {
+                    "step_id": step.get("step_id"),
+                    "tool_name": step_tool.value,
+                    "arguments": step.get("arguments"),
+                    "result": build_result_summary(step_tool, step_result),
+                }
+            )
+        summary["analysis_steps"] = bounded_evidence(
+            compact_steps, max_chars=5_500, results_summarized=True
+        )
+    if not isinstance(tool, dict):
         return None
 
     try:
@@ -171,7 +207,7 @@ def build_analysis_reference(
         answer=answer.strip()[:1_000] if isinstance(answer, str) else "",
         tool_name=tool_name,
         tool_arguments=arguments,
-        result_summary=build_result_summary(tool_name, result),
+        result_summary=summary if summary is not None else build_result_summary(tool_name, result),
         warnings=_warning_messages(warnings),
         sources=_string_items(sources),
     )
@@ -185,14 +221,11 @@ def planning_context(
 
     if decision.kind is not RouteKind.ANALYSIS:
         return ConversationContext()
-    references_by_id = {
-        reference.trace_id: reference for reference in context.analysis_references
-    }
+    references_by_id = {reference.trace_id: reference for reference in context.analysis_references}
     return ConversationContext(
         messages=context.messages,
         analysis_references=[
-            references_by_id[trace_id]
-            for trace_id in decision.analysis_reference_ids
+            references_by_id[trace_id] for trace_id in decision.analysis_reference_ids
         ],
     )
 
@@ -207,9 +240,7 @@ def filter_analysis_references(
         return decision
     available_ids = {reference.trace_id for reference in context.analysis_references}
     valid_ids = [
-        trace_id
-        for trace_id in decision.analysis_reference_ids
-        if trace_id in available_ids
+        trace_id for trace_id in decision.analysis_reference_ids if trace_id in available_ids
     ]
     if valid_ids == decision.analysis_reference_ids:
         return decision

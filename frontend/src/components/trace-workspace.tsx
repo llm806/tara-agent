@@ -21,6 +21,7 @@ import remarkGfm from "remark-gfm";
 
 import { getSessionTrace, listSessionTraces } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/format";
+import { dataSourceLabel, summarizeDataFilters } from "@/lib/trace-data-summary";
 import type { DataSource, TraceDetail, TraceSpan, TraceSummary } from "@/lib/types";
 
 type TraceWorkspaceProps = { sessionId: string; initialTraceId?: string };
@@ -300,18 +301,31 @@ function AnalysisOverview({ trace }: { trace: TraceDetail }) {
       .map((source) => source.filename)
       .filter((value): value is string => Boolean(value)),
   )];
-  const spanFilters = toolSpans.flatMap((span) => (
-    Object.entries(span.filters).map(([key, value]) => ({ spanId: span.id, key, value }))
-  ));
   const responseFilters = recordValue(provenance, "filters");
-  const filters = spanFilters.length > 0 ? spanFilters : Object.entries(responseFilters ?? {})
-    .map(([key, value]) => ({ spanId: trace.id, key, value }));
-  const methods = [...new Set(
-    [
-      ...toolSpans.map((span) => span.tool_name),
-      recordText(responseTool, "name"),
-    ].filter((name): name is string => Boolean(name)),
-  )];
+  const dataSteps = toolSpans.slice().sort((left, right) => left.sequence_no - right.sequence_no)
+    .map((span, index) => ({
+      id: span.id,
+      round: index + 1,
+      tags: summarizeDataFilters(span.tool_name ?? span.name, { ...span.input_data, ...span.filters }),
+    }));
+  if (dataSteps.length === 0 && responseFilters) {
+    dataSteps.push({ id: "response", round: 1,
+      tags: summarizeDataFilters(recordText(responseTool, "name") ?? "", responseFilters) });
+  }
+  const commonTags = (dataSteps[0]?.tags ?? []).filter((tag) => (
+    ["版本", "类群", "标记"].includes(tag.label)
+    && dataSteps.every((step) => step.tags.some((item) => item.label === tag.label && item.value === tag.value))
+  ));
+  const methodCalls = toolSpans
+    .slice()
+    .sort((left, right) => left.sequence_no - right.sequence_no)
+    .map((span) => span.tool_name ?? (span.span_kind === "tool" ? span.name : undefined))
+    .filter((name): name is string => Boolean(name))
+    .map((name, index) => ({ name, round: index + 1 }));
+  if (methodCalls.length === 0) {
+    const responseToolName = recordText(responseTool, "name");
+    if (responseToolName) methodCalls.push({ name: responseToolName, round: 1 });
+  }
 
   return (
     <TraceSection
@@ -323,10 +337,41 @@ function AnalysisOverview({ trace }: { trace: TraceDetail }) {
         <div><span>问题理解</span><MarkdownContent content={understanding} /></div>
         <div>
           <span>数据与筛选</span>
-          <p>{sources.length > 0 ? sources.join("、") : "尚未读取数据"}</p>
-          {filters.length > 0 ? <div className="trace-filter-tags">{filters.map(({ spanId, key, value }) => <code key={`${spanId}-${key}`}>{key}: {String(value)}</code>)}</div> : null}
+          {sources.length ? (
+            <div className="trace-data-chips">使用{sources.map((source) => (
+              <code key={source} title={source}>{dataSourceLabel(source)}</code>
+            ))}数据。</div>
+          ) : <p>尚未记录数据来源</p>}
+          {commonTags.length > 0 ? <div className="trace-filter-tags">{commonTags.map((tag) => (
+            <code key={tag.label} title={tag.detail}>{tag.label}：{tag.value}</code>
+          ))}</div> : null}
+          {dataSteps.length > 0 ? <p className="trace-data-caption">各轮筛选与比较条件：</p> : null}
+          <div className="trace-data-steps">
+            {dataSteps.map((step) => (
+              <div className="trace-filter-tags trace-data-step" key={step.id}>
+                <small>第 {step.round} 轮：</small>
+                {step.tags.filter((tag) => !commonTags.some((item) => item.label === tag.label && item.value === tag.value)).map((tag, index) => (
+                  <code key={`${tag.label}-${index}`} title={tag.detail}>{["信号层", "范围", "排名"].includes(tag.label) ? tag.value : `${tag.label}：${tag.value}`}</code>
+                ))}
+                {step.tags.length === 0 ? <small>条件见节点详情</small> : null}
+              </div>
+            ))}
+          </div>
         </div>
-        <div><span>分析方法</span><p>{methods.length > 0 ? methods.map(toolLabel).join("、") : "尚未调用分析工具"}</p></div>
+        <div>
+          <span>分析方法</span>
+          {methodCalls.length > 0 ? (
+            <div className="trace-method-list">
+              {methodCalls.map(({ name, round }) => (
+                <div className="trace-method-item" key={`${round}-${name}`}>
+                  <strong>第 {round} 轮调用</strong>
+                  <code>{name}</code>
+                  <small>{toolLabel(name)}</small>
+                </div>
+              ))}
+            </div>
+          ) : <p>尚未调用分析工具</p>}
+        </div>
         <div className="trace-conclusion"><span>分析结论</span><MarkdownContent content={conclusion} /></div>
       </div>
     </TraceSection>
@@ -481,7 +526,9 @@ function FactBlock({ label, value }: { label: string; value: string }) {
   return <div className="span-fact-block"><strong>{label}</strong><span>{value}</span></div>;
 }
 function KeyValues({ title, value }: { title: string; value: Record<string, unknown> }) {
-  return <div className="span-key-values"><strong>{title}</strong><div>{Object.entries(value).map(([key, item]) => <code key={key}>{key}: {String(item)}</code>)}</div></div>;
+  const entries = summarizeFilterEntries(Object.entries(value));
+  if (entries.length === 0) return null;
+  return <div className="span-key-values"><strong>{title}</strong><div>{entries.map((entry) => <code key={`${entry.key}-${entry.value}`}>{entry.label}：{entry.value}</code>)}</div></div>;
 }
 function SourceFiles({ sources }: { sources: DataSource[] }) {
   const filenames = [...new Set(sources.map((source) => source.filename).filter((value): value is string => Boolean(value)))];
@@ -494,6 +541,84 @@ function JsonBlock({ title, value }: { title: string; value: Record<string, unkn
 }
 function nonEmptyRecord(value: Record<string, unknown>): Record<string, unknown> | null {
   return Object.keys(value).length > 0 ? value : null;
+}
+
+type SummaryFilter = { key: string; label: string; value: string };
+
+const technicalFilterKeys = new Set([
+  "source_files",
+  "source_reports",
+  "manifest_sha256",
+  "study_manifest_sha256",
+  "source_manifest_sha256",
+  "method_reference",
+  "correspondence_evidence",
+  "sequence_evidence",
+]);
+
+const filterLabels: Record<string, string> = {
+  assay: "实验层",
+  dataset_version: "数据版本",
+  depth: "水层",
+  depths: "水层",
+  experiment: "实验",
+  function: "功能",
+  limit: "数量上限",
+  marker: "标记基因",
+  min_evalue: "E-value",
+  offset: "起始位置",
+  pfam: "Pfam",
+  sample_id: "样本",
+  sample_ids: "样本",
+  sample_name: "样本",
+  taxon: "类群",
+  top_n: "Top N",
+};
+
+function summarizeFilterEntries(entries: Array<[string, unknown]>): SummaryFilter[] {
+  const result: SummaryFilter[] = [];
+  const seen = new Set<string>();
+  const add = (key: string, value: unknown) => {
+    if (technicalFilterKeys.has(key) || value === null || value === undefined || value === "") return;
+    if (key === "offset") return;
+    const text = formatTraceValue(value);
+    if (!text) return;
+    const identity = `${key}:${text}`;
+    if (seen.has(identity)) return;
+    seen.add(identity);
+    result.push({ key, label: filterLabels[key] ?? key, value: text });
+  };
+
+  for (const [key, value] of entries) {
+    if (key === "query" || key === "selection" || key === "context") {
+      if (isRecord(value)) {
+        for (const [nestedKey, nestedValue] of Object.entries(value)) add(nestedKey, nestedValue);
+      }
+    } else add(key, value);
+  }
+  return result;
+}
+
+function formatTraceValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    const items = value.map(formatTraceValue).filter(Boolean);
+    if (items.length === 0) return "";
+    return items.length > 6 ? `${items.slice(0, 6).join("、")} 等 ${items.length} 项` : items.join("、");
+  }
+  if (isRecord(value)) {
+    const values = Object.entries(value)
+      .filter(([key]) => !technicalFilterKeys.has(key))
+      .map(([key, item]) => `${filterLabels[key] ?? key}：${formatTraceValue(item)}`)
+      .filter((item) => !item.endsWith("："));
+    return values.length > 0 ? values.slice(0, 4).join("；") : "";
+  }
+  return "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function StatusBadge({ status, compact = false }: { status: string; compact?: boolean }) {
   const Icon = status === "completed" ? CheckCircle2 : status === "failed" ? AlertTriangle : Clock3;
@@ -551,9 +676,14 @@ function spanKindLabel(kind: string): string {
 }
 function toolLabel(name: string): string {
   const labels: Record<string, string> = {
+    compare_function_signals: "比较 MetaG / MetaT 功能信号",
     find_samples: "筛选样本",
+    find_function_samples: "筛选功能样本",
+    function_atlas: "统计功能谱",
+    function_profile: "计算单样本功能谱",
     get_sample_info: "查询样本详情",
     find_taxa: "查询分类群",
+    retrieve_gene_sequences: "查询目标核酸序列",
     taxon_abundance: "计算分类群丰度",
     diversity_analysis: "分析生物多样性",
     environment_association: "分析丰度与环境的关联",

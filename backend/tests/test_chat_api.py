@@ -77,7 +77,8 @@ async def test_chat_stream_returns_sse_trace(chat_app: FastAPI) -> None:
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.text.count("event: step") == 4
     assert response.text.count("event: reasoning_delta") == 1
-    assert response.text.count("event: answer_delta") == 2
+    assert response.text.count("event: answer_delta") == 3
+    assert "【最终结果】" in response.text
     assert "event: complete" in response.text
     assert '"taxon_abundance"' in response.text
     assert response.text.index("event: answer_delta") < response.text.index("event: complete")

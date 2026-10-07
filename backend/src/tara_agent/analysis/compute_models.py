@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tara_agent.analysis.models import Page, TaxonMatchMode
 from tara_agent.domain.contracts import Marker, ResultMetadata
@@ -52,6 +53,66 @@ class TaxonAbundanceQuery(TaxonSelection):
     include_zero_samples: bool = True
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=500)
+    order_by: Literal["sample_id", "relative_abundance"] = Field(
+        default="sample_id",
+        description="relative_abundance 在全部所选样本上降序排序后分页，空值最后",
+    )
+    group_by: Literal["station"] | None = Field(
+        default=None,
+        description="station 返回所有所选样本按站点等权均值和最大值及两套排名；不是独立重复",
+    )
+    aggregation: Literal["mean", "max"] = "mean"
+    taxonomic_rank: Literal["genus", "species", "asv"] | None = Field(
+        default=None,
+        description="指定 1–20 个 sample_ids 的类群内组成；每样本分别排名和分页；保留未鉴定分类",
+    )
+
+    @model_validator(mode="after")
+    def check_composition_scope(self):
+        if self.taxonomic_rank is not None:
+            if not self.sample_ids or len(self.sample_ids) > 20:
+                raise ValueError("属/种/ASV 组成需明确指定 1–20 个样本")
+            if self.group_by is not None:
+                raise ValueError("组成分析保留各样本，不能同时按站点合并")
+        return self
+
+
+class StationAbundanceSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    station: str
+    mean_rank: int | None = Field(default=None, ge=1)
+    max_rank: int | None = Field(default=None, ge=1)
+    mean_relative_abundance: float | None = Field(default=None, ge=0, le=1)
+    max_relative_abundance: float | None = Field(default=None, ge=0, le=1)
+    sample_count: int = Field(ge=1)
+    valid_sample_count: int = Field(ge=0)
+    sample_ids: list[str]
+
+
+class TaxonCompositionObservation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sample_id: str
+    rank: int = Field(ge=1)
+    taxon_label: str
+    classification_status: Literal["assigned", "unresolved", "asv"]
+    read_count: int = Field(ge=1)
+    relative_abundance: float | None = Field(ge=0, le=1)
+    fraction_within_selected_taxon: float = Field(ge=0, le=1)
+    cumulative_fraction: float = Field(ge=0, le=1)
+    asv_count: int = Field(ge=1)
+    taxonomy: str
+
+
+class TaxonCompositionSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sample_id: str
+    selected_taxon_read_count: int = Field(ge=0)
+    sample_total_read_count: int = Field(ge=0)
+    total_groups: int = Field(ge=0)
+    returned_groups: int = Field(ge=0)
+    unresolved_read_count: int = Field(ge=0)
+    dominant_taxon: str | None
+    dominant_fraction: float | None = Field(ge=0, le=1)
 
 
 class TaxonAbundanceObservation(BaseModel):
@@ -73,6 +134,17 @@ class TaxonAbundanceResult(BaseModel):
     page: Page
     matching_asv_count: int = Field(ge=0)
     metadata: ResultMetadata
+    group_by: Literal["station"] | None = None
+    aggregation: Literal["mean", "max"] | None = None
+    groups: list[StationAbundanceSummary] = Field(default_factory=list)
+    station_leaders: list[StationAbundanceSummary] = Field(
+        default_factory=list,
+        description="完整所选范围内均值、最大值各第一名；相同站点去重，并列时按站点名取一个代表，排名仍保留并列",
+    )
+    group_page: Page | None = None
+    taxonomic_rank: Literal["genus", "species", "asv"] | None = None
+    composition: list[TaxonCompositionObservation] = Field(default_factory=list)
+    composition_summaries: list[TaxonCompositionSummary] = Field(default_factory=list)
 
 
 class DiversityGroup(StrEnum):

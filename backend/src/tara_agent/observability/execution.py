@@ -152,6 +152,38 @@ def observe(
     return ObservationScope(name, span_kind, details)
 
 
+def execution_parent_id() -> str | None:
+    """将当前真实父节点传给远程分析，不创建独立 Trace。"""
+
+    context = _current_context.get()
+    return context.parent_id if context is not None else None
+
+
+def replay_execution_observations(events: list[TraceObservationEvent]) -> None:
+    """验证完整子树后转交同一 Recorder，防止远程节点越界或悬空。"""
+
+    context = _current_context.get()
+    if context is None:
+        return
+    parents = {context.parent_id}
+    running: dict[str, tuple[str, str, ObservationKind]] = {}
+    for event in events:
+        if event.parent_id not in parents:
+            raise ValueError("远程观测节点不属于当前执行树")
+        identity = (event.parent_id, event.name, event.span_kind)
+        if event.phase == "started":
+            if event.observation_id in parents:
+                raise ValueError("远程观测节点标识重复")
+            running[event.observation_id] = identity
+            parents.add(event.observation_id)
+        elif running.pop(event.observation_id, None) != identity:
+            raise ValueError("远程观测节点没有对应的开始事件")
+    if running:
+        raise ValueError("远程观测包含未结束的节点")
+    for event in events:
+        context.writer(event.model_dump(mode="json"))
+
+
 def _update_mapping(update: ObservationUpdate | None) -> dict[str, Any] | None:
     if update is None:
         return None

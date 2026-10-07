@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  ChartNoAxesCombined,
   AlertTriangle,
   ArrowUp,
   BrainCircuit,
@@ -11,10 +12,8 @@ import {
   FileText,
   Info,
   LoaderCircle,
-  Map as MapIcon,
   Network,
   UserRound,
-  Waves,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -23,6 +22,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ResultTable } from "@/components/result-table";
+import { ArtifactHeading } from "@/components/artifact-heading";
+import { chartKindLabels, chartSummary } from "@/lib/artifact-summary";
+import { ConversationNavigation } from "@/components/conversation-navigation";
+import { ResponseCardGroup, useResponseCard } from "@/components/response-card-group";
 import { QuestionSuggestions } from "@/components/question-suggestions";
 import { SessionSidebar } from "@/components/session-sidebar";
 import { apiBaseUrl, getSession } from "@/lib/api";
@@ -54,6 +57,7 @@ type Run = {
   model?: string;
   sources?: string[];
   traceId?: string;
+  historyLoadFailed?: boolean;
 };
 
 export function ChatWorkspace() {
@@ -63,9 +67,11 @@ export function ChatWorkspace() {
   const [historyVersion, setHistoryVersion] = useState(0);
   const [loadingSession, setLoadingSession] = useState(false);
   const [busy, setBusy] = useState(false);
+  const runSequence = useRef(0);
   const followOutput = useRef(true);
   const canSubmit = question.trim().length > 0 && !busy;
   const latestRun = runs[runs.length - 1];
+  const indexedRuns = runs.filter((run) => !run.historyLoadFailed);
   const latestTracedRun = [...runs].reverse().find((run) => run.traceId);
   const currentTraceHref = sessionId && latestTracedRun?.traceId
     ? traceHref(sessionId, latestTracedRun.traceId)
@@ -75,7 +81,8 @@ export function ChatWorkspace() {
   useEffect(() => {
     function updateFollowPreference() {
       const remaining = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
-      followOutput.current = remaining < 180;
+      // 浏览历史后由“回到底部”或新提问明确恢复跟随，程序滚动不重新开启。
+      followOutput.current = followOutput.current && remaining < 180;
     }
 
     window.addEventListener("scroll", updateFollowPreference, { passive: true });
@@ -97,7 +104,8 @@ export function ChatWorkspace() {
     if (!normalized || busy) {
       return;
     }
-    const id = crypto.randomUUID();
+    // 仅用于当前页面的临时行标识；校内 HTTP 下不能依赖安全上下文 UUID 接口。
+    const id = `pending-run-${++runSequence.current}`;
     followOutput.current = true;
     setRuns((current) => [
       ...current,
@@ -193,9 +201,25 @@ export function ChatWorkspace() {
   }
 
   function startNewSession() {
+    followOutput.current = true;
     setSessionId(undefined);
     setRuns([]);
     setQuestion("");
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function navigateConversation(target: "top" | "bottom" | { id: string }) {
+    followOutput.current = target === "bottom";
+    if (typeof target === "string") {
+      window.scrollTo({
+        top: target === "top" ? 0 : document.documentElement.scrollHeight,
+        behavior: "auto",
+      });
+    } else {
+      const turn = document.getElementById(`analysis-run-${target.id}`);
+      turn?.scrollIntoView({ block: "start", behavior: "auto" });
+      turn?.focus({ preventScroll: true });
+    }
   }
 
   function handleSessionsDeleted(sessionIds: string[]) {
@@ -209,6 +233,7 @@ export function ChatWorkspace() {
       return;
     }
     setLoadingSession(true);
+    followOutput.current = false;
     try {
       const session = await getSession(nextSessionId);
       setSessionId(session.id);
@@ -233,7 +258,7 @@ export function ChatWorkspace() {
         onSessionsDeleted={handleSessionsDeleted}
       />
 
-      <main className="workspace">
+      <main className={`workspace${!loadingSession && runs.length === 0 ? " workspace-empty" : ""}`}>
         <header className="topbar">
           <div>
             <span className="context-label">Tara Agent</span>
@@ -252,11 +277,16 @@ export function ChatWorkspace() {
           ) : null}
         </header>
 
-        <div className="conversation" aria-live="polite">
+        <div className={`conversation${!loadingSession && runs.length === 0 ? " conversation-empty" : ""}`} aria-live="polite">
           {loadingSession ? <div className="workspace-loading"><LoaderCircle className="spin" />正在加载对话…</div> : null}
           {!loadingSession && runs.length === 0 ? <EmptyState onExample={submit} /> : null}
-          {runs.map((run) => <AnalysisRun key={run.id} run={run} />)}
+          {runs.map((run, index) => <AnalysisRun key={run.id} run={run} turn={index + 1} />)}
         </div>
+
+        {!loadingSession && indexedRuns.length > 0 ? (
+          <ConversationNavigation key={sessionId ?? "new-session"}
+            items={indexedRuns} onNavigate={navigateConversation} />
+        ) : null}
 
         <div className="composer-wrap">
           <form className="composer" onSubmit={onSubmit}>
@@ -276,7 +306,8 @@ export function ChatWorkspace() {
               placeholder="询问样本、分类群、丰度、多样性或环境关联…"
               aria-label="输入 Tara 数据问题"
             />
-            <button className="send-button" type="submit" disabled={!canSubmit}>
+            <button className="send-button" type="submit" disabled={!canSubmit}
+              aria-label={busy ? "分析中" : "发送"}>
               {busy ? <LoaderCircle className="spin" size={18} /> : <ArrowUp size={18} />}
               <span>{busy ? "分析中" : "发送"}</span>
             </button>
@@ -290,14 +321,12 @@ export function ChatWorkspace() {
 function EmptyState({ onExample }: { onExample: (question: string) => Promise<void> }) {
   return (
     <section className="empty-state">
-      <div className="empty-icon"><Waves size={27} aria-hidden="true" /></div>
-      <p className="context-label">Tara Agent</p>
       <QuestionSuggestions onSelect={onExample} />
     </section>
   );
 }
 
-function AnalysisRun({ run }: { run: Run }) {
+function AnalysisRun({ run, turn }: { run: Run; turn: number }) {
   const inProgress = !run.historical && !run.response && !run.error;
   const reasoningActive = inProgress && !run.streamedAnswer;
   const answer = run.response?.answer ?? run.streamedAnswer;
@@ -305,13 +334,15 @@ function AnalysisRun({ run }: { run: Run }) {
     || run.steps.some((step) => step.stage === "execute" || step.stage === "answer");
 
   return (
-    <article className="analysis-run">
+    <article className="analysis-run" id={`analysis-run-${run.id}`}
+      tabIndex={-1} aria-label={`第 ${turn} 轮对话`}>
       <UserMessage question={run.question} createdAt={run.createdAt} />
       <div className="agent-response">
         <div className={`agent-avatar${inProgress ? " running" : ""}`} aria-hidden="true">
           {inProgress ? <Activity className="analysis-running-icon" size={18} /> : <Network size={17} />}
         </div>
         <div className="agent-message">
+          <ResponseCardGroup showControls={!run.historical || Boolean(run.response || answer || run.streamedReasoning)}>
           <div className="response-content">
             {!run.historical || run.response ? (
               <ProcessPanel
@@ -329,6 +360,7 @@ function AnalysisRun({ run }: { run: Run }) {
                 answer={answer}
                 active={inProgress}
                 analysis={analysis}
+                incomplete={run.response?.result.status === "partial"}
               />
             ) : null}
             {run.error ? (
@@ -350,6 +382,7 @@ function AnalysisRun({ run }: { run: Run }) {
               </time>
             </div>
           ) : null}
+          </ResponseCardGroup>
         </div>
       </div>
     </article>
@@ -435,11 +468,11 @@ function ProcessPanel({ steps, response, active, analysis }: ProcessPanelProps) 
       className={`process-panel${active ? " active" : ""}`}
       icon={active ? <LoaderCircle className="spin" size={16} /> : <Network size={16} />}
       title={analysis ? "分析过程" : "处理过程"}
-      meta={active ? "正在进行" : `${steps.length} 个步骤`}
+      meta={active ? "正在进行" : `${response?.result.status === "partial" ? "部分完成 · " : ""}${steps.length} 个步骤`}
     >
       {steps.length > 0 ? (
         <ol>
-          {steps.map((step) => <li key={step.stage}><strong>{step.title}</strong><span>{step.detail}</span></li>)}
+          {steps.map((step, index) => <li key={`${step.stage}-${index}`}><strong>{step.title}</strong><span>{step.detail}</span></li>)}
         </ol>
       ) : (
         <p className="progress-placeholder">
@@ -458,16 +491,8 @@ function ProcessPanel({ steps, response, active, analysis }: ProcessPanelProps) 
 }
 
 function ReasoningPanel({ reasoning, active }: { reasoning: string; active: boolean }) {
-  const [open, setOpen] = useState(active);
-  const previousActive = useRef(active);
+  const [open, setOpen] = useResponseCard(active);
   const contentRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (previousActive.current !== active) {
-      setOpen(active);
-      previousActive.current = active;
-    }
-  }, [active]);
 
   useEffect(() => {
     if (!active || !open) {
@@ -502,17 +527,19 @@ function AnswerPanel({
   answer,
   active,
   analysis,
+  incomplete,
 }: {
   answer: string;
   active: boolean;
   analysis: boolean;
+  incomplete?: boolean;
 }) {
   return (
     <DisclosureSection
       className="answer-panel"
       icon={<FileText size={16} />}
       title={analysis ? "分析结论" : "回答"}
-      meta={active ? "正在生成" : "已完成"}
+      meta={active ? "正在生成" : incomplete ? "部分完成" : "已完成"}
     >
       <div className={active ? "streaming-answer" : undefined}>
         <MarkdownAnswer answer={answer} />
@@ -547,8 +574,8 @@ function CompletedArtifacts({
           meta={`${response.warnings.length} 项`}
         >
           <div className="analysis-notes">
-            {response.warnings.map((warning) => (
-              <div key={warning.code}>
+            {response.warnings.map((warning, index) => (
+              <div key={`${warning.code}-${index}`}>
                 <strong>{warningTitle(warning.code)}</strong>
                 <span>{warning.message}</span>
               </div>
@@ -561,19 +588,19 @@ function CompletedArtifacts({
         <DisclosureSection
           key={`${chart.kind}-${chart.title}`}
           className="chart-panel"
-          icon={<MapIcon size={16} />}
-          title="可视化结果"
-          meta={chart.title}
+          icon={<ChartNoAxesCombined size={18} />}
+          title={<ArtifactHeading title={`${chart.result_role === "intermediate" ? "【中间步骤结果】" : "【最终结果】"}${chart.title}`} {...chartSummary(chart, response)} />}
+          meta={chartKindLabels[chart.kind]}
         >
           <AnalysisChart chart={chart} />
         </DisclosureSection>
       ))}
-      <ResultTable result={response.result} />
+      <ResultTable result={response.result} sources={response.sources} />
 
       <footer className="provenance">
         <time dateTime={timestamp}>{formatDateTime(timestamp)}</time>
         <span>模型 {response.model}</span>
-        {response.tool ? (
+        {response.tool || response.sources.length > 0 ? (
           <span className="source-files">
             数据来源
             {response.sources.length > 0
@@ -589,13 +616,13 @@ function CompletedArtifacts({
 type DisclosureSectionProps = {
   className?: string;
   icon: ReactNode;
-  title: string;
+  title: ReactNode;
   meta?: string;
   children: ReactNode;
 };
 
 function DisclosureSection({ className = "", icon, title, meta, children }: DisclosureSectionProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useResponseCard();
 
   return (
     <details
@@ -616,6 +643,7 @@ function DisclosureSection({ className = "", icon, title, meta, children }: Disc
 
 function warningTitle(code: string): string {
   const titles: Record<string, string> = {
+    analysis_incomplete: "分析部分完成",
     missing_filter_values_excluded: "缺失值处理",
     missing_environment_values_excluded: "缺失值处理",
     missing_group_values_excluded: "缺失值处理",
@@ -695,6 +723,7 @@ function failedHistoryRun(sessionId: string, message: string): Run {
   const now = new Date().toISOString();
   return {
     id: `history-error-${sessionId}`,
+    historyLoadFailed: true,
     question: "加载历史对话",
     createdAt: now,
     completedAt: now,

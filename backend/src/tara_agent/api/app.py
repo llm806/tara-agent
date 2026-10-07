@@ -1,14 +1,16 @@
 """FastAPI 应用工厂。"""
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from tara_agent import __version__
 from tara_agent.agent import AgentModel, DeepSeekChatModel, TaraAgent
 from tara_agent.agent.gateway import MCPToolGateway
+from tara_agent.agent.home_suggestions import HomeSuggestionService
 from tara_agent.agent.runtime import PersistentAgentRunner
 from tara_agent.agent.suggestions import QuestionSuggestionService
 from tara_agent.api.routes import (
@@ -20,7 +22,9 @@ from tara_agent.api.routes import (
 )
 from tara_agent.auth import AuthService
 from tara_agent.config import Settings, get_settings
+from tara_agent.data.matou_reader import MatouDataReader
 from tara_agent.data.reader import ProcessedDataError, ProcessedDataReader
+from tara_agent.data_service.client import RemoteToolGateway
 from tara_agent.mcp import create_server
 from tara_agent.persistence import Database
 from tara_agent.persistence.repositories import AgentRunRepository
@@ -31,6 +35,7 @@ def create_app(
     *,
     agent_model: AgentModel | None = None,
     database: Database | None = None,
+    data_service_transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
     runtime_settings = settings or get_settings()
     runtime_database = database
@@ -68,24 +73,55 @@ def create_app(
         if runtime_database is not None
         else None
     )
-    try:
-        application.state.data_reader = ProcessedDataReader(runtime_settings.processed_data_dir)
-    except ProcessedDataError:
-        application.state.data_reader = None
+    application.state.data_reader = None
+    application.state.remote_gateway = None
+    if runtime_settings.data_service_url is not None:
+        application.state.remote_gateway = RemoteToolGateway(
+            runtime_settings,
+            transport=data_service_transport,
+        )
+    else:
+        with suppress(ProcessedDataError):
+            application.state.data_reader = ProcessedDataReader(runtime_settings.processed_data_dir)
 
     application.state.agent = None
     application.state.persistent_agent = None
     application.state.question_suggestions = None
-    if application.state.data_reader is not None:
-        mcp_server = create_server(application.state.data_reader)
+    gateway = application.state.remote_gateway
+    if gateway is not None:
+        application.state.question_suggestions = gateway
+
+        def function_cache_ready():
+            return gateway.study_manifest_sha256 is not None
+    elif application.state.data_reader is not None:
+        matou_reader = (
+            MatouDataReader(runtime_settings.matou_data_dir)
+            if runtime_settings.matou_data_dir is not None
+            else None
+        )
+        mcp_server = create_server(application.state.data_reader, matou_reader=matou_reader)
         gateway = MCPToolGateway(mcp_server)
+
+        def function_cache_ready():
+            return matou_reader is not None and matou_reader.study_sha256 is not None
+
         application.state.question_suggestions = QuestionSuggestionService.from_reader(
             gateway,
             application.state.data_reader,
         )
+    if gateway is not None:
         model = agent_model
         if model is None and runtime_settings.deepseek_api_key is not None:
             model = DeepSeekChatModel(runtime_settings)
+        application.state.question_suggestions = HomeSuggestionService(
+            application.state.question_suggestions,
+            gateway,
+            function_cache_ready=function_cache_ready,
+            multi_step_available=(
+                callable(getattr(model, "select_workflow", None))
+                and callable(getattr(model, "next_analysis_step", None))
+            ),
+        )
         if model is not None:
             application.state.agent = TaraAgent(model, gateway)
             if application.state.run_repository is not None:

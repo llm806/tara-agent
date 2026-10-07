@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4
 
 import pytest
@@ -200,7 +201,7 @@ def test_analysis_reference_keeps_summary_and_removes_detail_rows() -> None:
                 "arguments": {"query": {"ocean_region": "Mediterranean"}},
             },
             "result": {
-                "items": [{"sample_id": "A"}, {"sample_id": "B"}],
+                "items": [{"sample_id_pangaea": "A"}, {"sample_id_pangaea": "B"}],
                 "page": {"offset": 0, "limit": 20, "total": 2},
             },
             "warnings": [{"message": "测试警告"}],
@@ -210,9 +211,80 @@ def test_analysis_reference_keeps_summary_and_removes_detail_rows() -> None:
 
     assert reference is not None
     assert reference.trace_id == trace_id
-    assert reference.result_summary == {"page": {"total": 2}}
+    assert "items" not in reference.result_summary
+    assert reference.result_summary["page"] == {"total": 2, "offset": 0, "limit": 20}
+    assert reference.result_summary["returned_sample_records"] == [
+        {"sample_id_pangaea": "A"},
+        {"sample_id_pangaea": "B"},
+    ]
     assert reference.warnings == ["测试警告"]
     assert reference.sources == ["context_general.tsv"]
+
+
+def test_large_multistep_history_preserves_samples_for_followup_after_reload() -> None:
+    response = {
+        "question": "找地中海样本并查询分类",
+        "answer": "已返回样本表与分类表。",
+        "result": {
+            "workflow": "multi_step",
+            "status": "completed",
+            "analysis_steps": [
+                {
+                    "step_id": "step1",
+                    "tool_name": "find_samples",
+                    "arguments": {"query": {"ocean_region": "Mediterranean"}},
+                    "result": {
+                        "items": [{"sample_id_pangaea": f"TARA_{i}"} for i in range(2)],
+                        "page": {"offset": 0, "limit": 20, "total": 2},
+                    },
+                },
+                {
+                    "step_id": "step2",
+                    "tool_name": "find_taxa",
+                    "arguments": {"query": {"marker": "v9", "taxon": "Bacillariophyta"}},
+                    "result": {
+                        "asvs": [{"amplicon": str(i), "sequence": "A" * 1000} for i in range(1000)],
+                        "asv_page": {"total": 1000, "offset": 0, "limit": 1000},
+                    },
+                },
+            ],
+        },
+    }
+    reference = build_analysis_reference(uuid4(), json.loads(json.dumps(response)))
+    assert reference is not None
+    context = build_conversation_context([], [reference], question="比较这两个样本的硅藻属组成")
+    assert context.analysis_references == [reference]
+    first = reference.result_summary["analysis_steps"][0]
+    assert first["result"]["returned_sample_records"] == [
+        {"sample_id_pangaea": "TARA_0"},
+        {"sample_id_pangaea": "TARA_1"},
+    ]
+    assert first["arguments"]["query"]["ocean_region"] == "Mediterranean"
+    assert len(json.dumps(reference.result_summary, ensure_ascii=False)) < 6000
+
+
+def test_sample_reference_marks_page_and_identifier_truncation() -> None:
+    reference = build_analysis_reference(
+        uuid4(),
+        {
+            "question": "列出MetaT样本",
+            "tool": {
+                "name": "find_function_samples",
+                "arguments": {"query": {"assay": "MetaT", "offset": 20, "limit": 30}},
+            },
+            "result": {
+                "items": [{"sample_name": f"T-{i}"} for i in range(20, 50)],
+                "page": {"total": 581, "offset": 20, "limit": 30},
+            },
+        },
+    )
+    assert reference is not None
+    summary = reference.result_summary
+    assert summary["page"] == {"total": 581, "offset": 20, "limit": 30}
+    assert len(summary["returned_sample_records"]) == 20
+    assert summary["returned_sample_records"][0]["sample_name"] == "T-20"
+    assert summary["returned_sample_scope"]["returned_count"] == 30
+    assert summary["returned_sample_scope"]["truncated"] is True
 
 
 def test_planning_context_keeps_messages_and_selected_analyses() -> None:

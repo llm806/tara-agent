@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol
+
 from mcp import Client
 from mcp.server import MCPServer
 
@@ -12,8 +14,16 @@ class AgentToolError(RuntimeError):
     """获准的 MCP 工具无法完成调用时抛出。"""
 
 
+class ToolGateway(Protocol):
+    """同一白名单工具契约的进程内和远程调用边界。"""
+
+    async def list_tools(self) -> list[ToolDefinition]: ...
+
+    async def call(self, tool_name: ToolName, arguments: dict) -> dict: ...
+
+
 class MCPToolGateway:
-    """仅向 Agent 提供六个获准的 Tara 工具。"""
+    """仅向 Agent 提供已注册且在白名单内的 Tara 工具。"""
 
     def __init__(self, server: MCPServer) -> None:
         self.server = server
@@ -43,9 +53,7 @@ class MCPToolGateway:
         async with Client(self.server) as client:
             result = await client.call_tool(tool_name.value, arguments)
         if result.is_error:
-            message = " ".join(
-                block.text for block in result.content if hasattr(block, "text")
-            )
+            message = " ".join(block.text for block in result.content if hasattr(block, "text"))
             raise AgentToolError(message or f"Tool failed: {tool_name}")
         if result.structured_content is None:
             raise AgentToolError(f"Tool returned no structured result: {tool_name}")

@@ -4,6 +4,8 @@ Tara Agent 面向 Tara Oceans 数据，支持自然语言问答、数据分析�
 
 本文说明本地开发流程。命令使用 PowerShell；“项目根目录”指包含本文件的 `tara-agent/` 目录。
 
+需要一条命令启动前端、后端、数据库和网站入口时，按 [Docker 部署指南](deploy/README.md)操作。该方式使用正式构建，适合验证部署；下面的流程适合日常修改代码。
+
 ## 1. 首次复现：准备环境和数据
 
 新电脑或新克隆的项目按本节依次操作，完成后进入第 2 节启动项目。
@@ -36,6 +38,8 @@ DEEPSEEK_API_KEY=你的密钥
 
 ### 1.3 放置数据集
 
+使用团队校内数据服务时，科学数据保留在服务器，不需要在本机放置这四份 TSV，也跳过下一节的 `uv run tara-data`。先完成数据库、依赖初始化，再按第 2.4 节配置远程连接。
+
 GitHub 仓库不包含科学数据文件，克隆代码后需自行准备以下四份 TSV：
 
 | 数据集文件 | 内容 |
@@ -67,11 +71,11 @@ uv sync --locked
 # 创建数据库表，并应用仓库中已有的数据库结构变更。
 uv run alembic upgrade head
 
-# 校验四份原始数据，生成后端分析使用的数据文件。
+# 本机持有科学数据时执行；使用第 2.4 节远程服务时跳过此命令。
 uv run tara-data
 ```
 
-数据处理结果默认保存在 `backend/data/processed/`，包括 Parquet 数据文件和记录来源、处理版本的 `manifest.json`。数据处理成功后再启动后端；缺少数据或校验失败时，完整分析功能不可用。
+本机数据处理结果默认保存在 `backend/data/processed/`，包括 Parquet 数据文件和记录来源、处理版本的 `manifest.json`。本机模式须完成数据处理；远程模式须配置连接并保持服务器服务及 SSH 隧道可用。
 
 ### 1.5 安装前端依赖
 
@@ -127,6 +131,37 @@ pnpm dev
 保持前后端终端运行，打开 `http://localhost:3000`，注册账号或使用开发环境的游客入口。前端默认连接本机后端，无需额外配置 API 地址。
 
 后端状态可在 `http://localhost:8000/api/v1/health` 查看。结束开发时，在前后端终端分别按 `Ctrl+C` 停止服务。
+
+### 2.4 使用校内数据服务：团队日常操作
+
+服务器运行科学数据服务，开发者本机运行数据库、后端和前端。服务器地址、账号、实际目录和凭据由维护者私下提供，不写入共享文档或 Git。
+
+**服务端：** 维护者先配置运行环境中的 `TARA_DATASET_DIR`、`TARA_PROCESSED_DATA_DIR` 和 `TARA_DATA_SERVICE_TOKEN`（至少 32 字符）；启用 MATOU 时另设置 `TARA_MATOU_DATA_DIR`。在服务器代码的 `backend/` 目录启动：
+
+```bash
+uv run --locked python -m uvicorn tara_agent.data_service.app:create_app --factory --host 127.0.0.1 --port 8011 --workers 1
+```
+
+服务已运行时无需重复启动。此命令前台运行，保持终端开启；按 `Ctrl+C` 停止，未配置开机自启。已有部署按维护者的私有配置运行。
+
+**本机首次配置：** 向维护者获取凭据文件，保存在用户目录；在 `backend/.env` 配置下列两项，保留原有数据库、模型和认证配置：
+
+```dotenv
+TARA_DATA_SERVICE_URL=http://127.0.0.1:18011
+TARA_DATA_SERVICE_TOKEN_FILE=~/.tara-data-service.token
+```
+
+本机无需科学数据或 `TARA_MATOU_DATA_DIR`。凭据和 `.env` 不提交；修改配置后重启后端。
+
+**每日启动：** 用维护者提供的 SSH 配置建立隧道，将下方占位符替换为自己的 SSH 连接别名，保持窗口运行：
+
+```powershell
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:18011:127.0.0.1:8011 '<SSH连接别名>'
+```
+
+随后按第 2.1–2.3 节启动本机应用，不需要重新上传或处理科学数据。端口以团队私下约定为准，变更时同步调整隧道和服务 URL。
+
+**检查与停止：** 查看本机 `/api/v1/ready`，HTTP 200 表示就绪。结束开发时，在本机前后端和隧道窗口按 `Ctrl+C`；共享服务由维护者管理。科学代码、计算依赖或数据清单更新后，同步服务器版本并重启两端后端。首次接入与升级验收见[后端说明](backend/README.md#校内独立数据服务)。本机 API 端口变更后的前端配置见[前端说明](frontend/README.md)，页面与 API 统一使用 `localhost`。
 
 ## 3. 拉取更新后：只处理发生变化的部分
 

@@ -81,9 +81,7 @@ async def test_suggestions_replace_current_batch(
     assert len(first) == 4
     assert len({item.category for item in first}) == 4
     assert {item.id for item in first}.isdisjoint(item.id for item in second)
-    assert {item.id for item in [*first, *second]}.isdisjoint(
-        item.id for item in third
-    )
+    assert {item.id for item in [*first, *second]}.isdisjoint(item.id for item in third)
 
 
 @pytest.mark.anyio
@@ -112,7 +110,12 @@ async def test_question_suggestion_api_returns_supported_questions(
     assert response.status_code == 200
     assert replacement.status_code == 200
     assert len(first_items) == 4
-    assert all(set(item) == {"id", "category", "question"} for item in first_items)
+    assert all(
+        set(item)
+        == {"id", "category", "question", "task_type", "datasets", "availability", "limitation"}
+        for item in first_items
+    )
+    assert all(item["datasets"] and item["availability"] == "available" for item in first_items)
     replacement_ids = {item["id"] for item in replacement.json()["items"]}
     assert replacement_ids.isdisjoint(item["id"] for item in first_items)
 

@@ -106,7 +106,13 @@ def register_tools(
             ),
         ],
     ) -> TaxonAbundanceResult:
-        """计算一个分类单元的原始测序读数和样本内相对丰度。"""
+        """计算类群测序相对丰度。order_by=relative_abundance 在全集计算后排序再分页。
+
+        group_by=station 返回站点等权样本均值、最大值及两套排名，aggregation 控制列表排序。
+        taxonomic_rank=genus/species/asv 返回 1–20 个指定样本内所选类群组成，
+        每样本独立排序分页；包括全样本相对丰度和类群内部占比及优势类群摘要。
+        未鉴定记录保留，属种不是凭名称猜测；均值和最大值不表示绝对或细胞丰度。
+        """
 
         return _call(
             "TaraComputeService.taxon_abundance",

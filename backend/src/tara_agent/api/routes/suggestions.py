@@ -4,7 +4,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
-from tara_agent.agent.suggestions import QuestionSuggestionService
+from tara_agent.agent.gateway import AgentToolError
+from tara_agent.agent.home_suggestions import HomeSuggestionService
 from tara_agent.api.dependencies import CurrentUserDependency
 from tara_agent.api.schemas import (
     QuestionSuggestionListResponse,
@@ -23,22 +24,29 @@ async def list_question_suggestions(
 ) -> QuestionSuggestionListResponse:
     """返回一批可由当前系统实际处理的问题。"""
 
-    service: QuestionSuggestionService | None = request.app.state.question_suggestions
+    service: HomeSuggestionService | None = request.app.state.question_suggestions
     if service is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="示例问题暂时不可用，请检查处理后数据。",
         )
-    items = await service.get_batch(
-        limit=limit,
-        exclude_ids=set(exclude_id or []),
-    )
+    try:
+        items = await service.get_batch(
+            limit=limit,
+            exclude_ids=set(exclude_id or []),
+        )
+    except AgentToolError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return QuestionSuggestionListResponse(
         items=[
             QuestionSuggestionResponse(
                 id=item.id,
                 category=item.category,
                 question=item.question,
+                task_type=item.task_type,
+                datasets=list(item.datasets),
+                availability=item.availability,
+                limitation=item.limitation,
             )
             for item in items
         ]

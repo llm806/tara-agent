@@ -16,6 +16,10 @@ export type QuestionSuggestion = {
   id: string;
   category: string;
   question: string;
+  task_type: "data_query" | "statistical_analysis" | "function_analysis" | "multi_step_analysis" | "research_discussion" | "literature_review";
+  datasets: string[];
+  availability: "available" | "planned";
+  limitation?: string | null;
 };
 
 export type QuestionSuggestionListResponse = {
@@ -55,13 +59,15 @@ export type ResultWarning = {
 };
 
 export type ChartSpec = {
-  kind: "sample_map" | "bar" | "scatter";
+  kind: "sample_map" | "bar" | "scatter" | "horizontal_bar" | "stacked_bar" | "correlation_circle" | "ordination" | "heatmap";
   title: string;
   x: Array<string | number>;
   y: number[];
   labels: string[];
   x_label: string;
   y_label: string;
+  series?: Array<{ name: string; values?: Array<number | null>; indices?: number[]; x?: number[]; y?: number[]; text?: string[] }>;
+  result_role?: "intermediate" | "final";
 };
 
 export type AgentResponse = {

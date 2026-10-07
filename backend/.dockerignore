@@ -1,0 +1,14 @@
+# 数据、密钥、测试和本机虚拟环境不打入运行镜像。
+.env
+.env.*
+.venv
+data
+tests
+benchmarks
+trace-test-temp
+__pycache__
+**/__pycache__
+.pytest_cache
+.ruff_cache
+*.log
+*.pyc

@@ -15,7 +15,8 @@ from tara_agent.agent.models import (
     ToolName,
     ToolPlan,
 )
-from tara_agent.agent.provider import AgentModelError, DeepSeekChatModel
+from tara_agent.agent.multistep import AnalysisDecision
+from tara_agent.agent.provider import AgentModelError, DeepSeekChatModel, MultiToolPlanRequired
 from tara_agent.config import Settings
 
 
@@ -39,9 +40,11 @@ class FakeStreamingCompletions:
         self,
         deltas: list[tuple[str | None, str | None]],
         usage: Any = None,
+        finish_reason: str | None = None,
     ) -> None:
         self.deltas = deltas
         self.usage = usage
+        self.finish_reason = finish_reason
         self.request: dict[str, Any] = {}
 
     async def create(self, **kwargs: Any) -> Any:
@@ -51,6 +54,16 @@ class FakeStreamingCompletions:
             for reasoning, content in self.deltas:
                 delta = SimpleNamespace(content=content, reasoning_content=reasoning)
                 yield SimpleNamespace(choices=[SimpleNamespace(delta=delta)], usage=None)
+            if self.finish_reason is not None:
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(content=None, reasoning_content=None),
+                            finish_reason=self.finish_reason,
+                        )
+                    ],
+                    usage=None,
+                )
             if self.usage is not None:
                 yield SimpleNamespace(choices=[], usage=self.usage)
 
@@ -80,9 +93,7 @@ def streaming_model_with(completions: FakeStreamingCompletions) -> DeepSeekChatM
 
 @pytest.mark.anyio
 async def test_planner_uses_required_function_call_with_mcp_schema() -> None:
-    completions = FakeCompletions(
-        [tool_call("find_samples", '{"query":{"limit":1}}')]
-    )
+    completions = FakeCompletions([tool_call("find_samples", '{"query":{"limit":1}}')])
     model = model_with(completions)
     tools = [
         ToolDefinition(
@@ -134,6 +145,18 @@ async def test_planner_rejects_unusable_function_calls(calls: list[Any]) -> None
 
 
 @pytest.mark.anyio
+async def test_multiple_white_list_calls_require_multi_step_instead_of_dropping_one():
+    model = model_with(FakeCompletions([
+        tool_call("get_sample_info", '{"sample_id":"TARA_TEST_001"}'),
+        tool_call("taxon_abundance", '{"query":{"marker":"v9","taxon":"Bacillariophyta"}}'),
+    ]))
+    tools = [ToolDefinition(name=name, description="测试工具", input_schema={})
+             for name in (ToolName.GET_SAMPLE_INFO, ToolName.TAXON_ABUNDANCE)]
+    with pytest.raises(MultiToolPlanRequired):
+        await model.plan("查询背景和组成", ConversationContext(), tools)
+
+
+@pytest.mark.anyio
 async def test_answer_streams_reasoning_and_content_as_separate_deltas() -> None:
     completions = FakeStreamingCompletions(
         [("先检查数据。", None), (None, "结论"), (None, "：可靠。")]
@@ -165,11 +188,13 @@ async def test_answer_streams_reasoning_and_content_as_separate_deltas() -> None
     assert completions.request["stream"] is True
     assert completions.request["stream_options"] == {"include_usage": True}
     assert completions.request["reasoning_effort"] == "low"
+    assert completions.request["max_tokens"] == model.trace_parameters["answer"]["max_tokens"]
     user_content = json.loads(completions.request["messages"][1]["content"])
     assert user_content["question"] == "找一个样本"
     assert user_content["tool_name"] == "find_samples"
     assert "items" not in user_content["tool_result"]
-    assert user_content["tool_result"]["page"] == {"total": 50}
+    assert user_content["tool_result"]["page"] == {"offset": 0, "limit": 100, "total": 50}
+    assert user_content["tool_result"]["returned_sample_scope"]["truncated"] is True
     assert "truncated_items" not in completions.request["messages"][1]["content"]
 
 
@@ -230,6 +255,16 @@ async def test_answer_rejects_stream_without_content() -> None:
 
 
 @pytest.mark.anyio
+async def test_answer_rejects_token_truncation_even_with_partial_content():
+    model = streaming_model_with(
+        FakeStreamingCompletions([(None, "已完成。工作")], finish_reason="length")
+    )
+    plan = ToolPlan(tool_name="find_samples", arguments={"query": {}}, rationale="查询。")
+    with pytest.raises(AgentModelError, match="incomplete"):
+        _ = [chunk async for chunk in model.stream_answer("问题", plan, {})]
+
+
+@pytest.mark.anyio
 async def test_router_uses_context_capabilities_and_structured_decision() -> None:
     reference_id = UUID("5a1f2381-ad65-486c-9003-6e902df8ac76")
     completions = FakeCompletions(
@@ -242,9 +277,7 @@ async def test_router_uses_context_capabilities_and_structured_decision() -> Non
                         "rationale": "用户在续接样本查询。",
                         "response": "",
                         "capability_requirements": ["sample_query"],
-                        "analysis_reference_ids": [
-                            "5a1f2381-ad65-486c-9003-6e902df8ac76"
-                        ],
+                        "analysis_reference_ids": ["5a1f2381-ad65-486c-9003-6e902df8ac76"],
                     },
                     ensure_ascii=False,
                 ),
@@ -279,15 +312,13 @@ async def test_router_uses_context_capabilities_and_structured_decision() -> Non
         "5a1f2381-ad65-486c-9003-6e902df8ac76"
     ]
     user_content = json.loads(completions.request["messages"][1]["content"])
-    assert user_content["conversation_context"]["messages"][0]["content"] == (
-        "先找地中海样本"
-    )
+    assert user_content["conversation_context"]["messages"][0]["content"] == ("先找地中海样本")
     assert "trace_id" not in user_content["conversation_context"]["messages"][0]
     assert user_content["capability_profile"]["product"] == "Tara Agent"
     assert completions.request["tools"][0]["function"]["name"] == "route_request"
-    reference_schema = completions.request["tools"][0]["function"]["parameters"][
-        "properties"
-    ]["analysis_reference_ids"]
+    reference_schema = completions.request["tools"][0]["function"]["parameters"]["properties"][
+        "analysis_reference_ids"
+    ]
     assert "maxItems" not in reference_schema
     assert reference_schema["items"]["enum"] == [str(reference_id)]
 
@@ -315,9 +346,9 @@ async def test_router_disallows_analysis_references_when_context_has_none() -> N
 
     await model.route("能做什么？", ConversationContext(), [])
 
-    reference_schema = completions.request["tools"][0]["function"]["parameters"][
-        "properties"
-    ]["analysis_reference_ids"]
+    reference_schema = completions.request["tools"][0]["function"]["parameters"]["properties"][
+        "analysis_reference_ids"
+    ]
     assert reference_schema["maxItems"] == 0
 
 
@@ -349,3 +380,81 @@ async def test_router_rejects_invalid_structured_decisions(calls: list[Any]) -> 
 
     with pytest.raises(AgentModelError):
         await model.route("test", ConversationContext(), [])
+
+
+@pytest.mark.anyio
+async def test_multistep_selector_and_planner_use_structured_evidence():
+    selection = FakeCompletions(
+        [
+            tool_call(
+                "select_analysis_workflow",
+                json.dumps(
+                    {
+                        "workflow": "multi_step",
+                        "rationale": "需要查询后计算。",
+                        "goals": ["查询样本", "计算候选功能谱"],
+                    }
+                ),
+            )
+        ]
+    )
+    model = model_with(selection)
+    assert (
+        await model.select_workflow("综合分析", ConversationContext(), [])
+    ).workflow == "multi_step"
+    assert selection.request["tool_choice"] == "required"
+    planner = FakeCompletions(
+        [
+            tool_call(
+                "analysis_next_step",
+                json.dumps(
+                    {
+                        "action": "tool",
+                        "rationale": "查询返回了准确编号。",
+                        "call": {
+                            "tool_name": "function_profile",
+                            "arguments": {"query": {"assay": "MetaT", "sample_name": "real-name"}},
+                        },
+                    }
+                ),
+            )
+        ]
+    )
+    model = model_with(planner)
+    result = await model.next_analysis_step(
+        "继续",
+        ConversationContext(),
+        [],
+        [{"step_id": 1, "result": {"items": [{"sample_name": "real-name"}], "total": 581}}],
+        {"tool_calls": 5, "seconds": 100},
+    )
+    assert isinstance(result, AnalysisDecision)
+    content = json.loads(planner.request["messages"][1]["content"])
+    assert content["verified_steps"][0]["result"]["items"][0]["sample_name"] == "real-name"
+    assert content["remaining_budget"]["tool_calls"] == 5
+    assert "usage" not in planner.request["tools"][0]["function"]["parameters"]["properties"]
+    assert result.usage is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"action": "tool", "rationale": "没有调用"},
+        {
+            "action": "finish",
+            "rationale": "非法调用",
+            "call": {"tool_name": "find_samples", "arguments": {}},
+        },
+        {
+            "action": "tool",
+            "rationale": "任意代码",
+            "call": {"tool_name": "run_python", "arguments": {}},
+        },
+        {"action": "clarify", "rationale": "没有具体问题"},
+    ],
+)
+async def test_multistep_provider_rejects_invalid_decisions(values):
+    model = model_with(FakeCompletions([tool_call("analysis_next_step", json.dumps(values))]))
+    with pytest.raises(AgentModelError):
+        await model.next_analysis_step("test", ConversationContext(), [], [], {})

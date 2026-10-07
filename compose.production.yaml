@@ -1,0 +1,106 @@
+# 与日常开发数据库使用不同名称，数据互不混用。
+name: tara-agent-deploy
+
+services:
+  postgres:
+    image: postgres:18.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?请配置 POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?请配置 POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请配置 POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    stop_grace_period: 30s
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+
+  backend:
+    build: ./backend
+    image: tara-agent-backend:${TARA_IMAGE_TAG:-local}
+    restart: unless-stopped
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?请配置 POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?请配置 POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请配置 POSTGRES_PASSWORD}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?请配置 DEEPSEEK_API_KEY}
+      TARA_ENVIRONMENT: ${TARA_ENVIRONMENT:?请配置 TARA_ENVIRONMENT}
+      TARA_PUBLIC_ORIGIN: ${TARA_PUBLIC_ORIGIN:?请配置 TARA_PUBLIC_ORIGIN}
+      TARA_CORS_ORIGINS: '["${TARA_PUBLIC_ORIGIN:?请配置 TARA_PUBLIC_ORIGIN}"]'
+      TARA_AUTH_GUEST_LOGIN_ENABLED: "true"
+      TARA_DATASET_DIR: /data/raw
+      TARA_PROCESSED_DATA_DIR: /data/processed
+    volumes:
+      # 缺少原始目录时立即报错，防止 Docker 悄悄创建一个空目录。
+      - type: bind
+        source: ${TARA_SOURCE_DATA_DIR:?请配置 TARA_SOURCE_DATA_DIR}
+        target: /data/raw
+        read_only: true
+        bind:
+          create_host_path: false
+      - processed_data:/data/processed
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/ready', timeout=5)"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 90s
+    stop_grace_period: 60s
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+
+  frontend:
+    build: ./frontend
+    image: tara-agent-frontend:${TARA_IMAGE_TAG:-local}
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    environment:
+      TARA_SITE_ADDRESS: ${TARA_SITE_ADDRESS:?请配置 TARA_SITE_ADDRESS}
+    # 只开放网站入口，数据库和前后端端口不直接暴露给外部。
+    ports:
+      - "${TARA_BIND_ADDRESS:-127.0.0.1}:${TARA_HTTP_PORT:-8080}:80"
+      - "${TARA_BIND_ADDRESS:-127.0.0.1}:${TARA_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging:
+      options: {max-size: "10m", max-file: "3"}
+
+# 这些卷由 Docker 独立保存；重建或删除容器不会删除里面的数据。
+volumes:
+  postgres_data:
+  processed_data:
+  caddy_data:
+  caddy_config:

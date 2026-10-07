@@ -1,0 +1,11 @@
+# 本机配置和依赖不能进入构建环境。
+.env
+.env.*
+node_modules
+.next
+out
+coverage
+*.tsbuildinfo
+*.log
+*.pem
+next-env.d.ts

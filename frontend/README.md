@@ -13,7 +13,11 @@ pnpm dev
 
 访问 `http://localhost:3000`。日常开发直接运行上述命令；只有前端依赖或锁文件变化时，才需要在本目录执行 `pnpm install --frozen-lockfile`，按锁定版本重新安装依赖。
 
-本地开发无需创建 `.env.local`。前端默认将 `/api` 请求转发到 `http://127.0.0.1:8000/api`。
+本地开发无需创建 `.env.local`。前端默认通过同源 `/api` 路径转发到 `http://127.0.0.1:8000/api`。
+
+若后端使用 8001，在 `frontend/.env.local` 设置 `TARA_API_PROXY_TARGET=http://127.0.0.1:8001`，重启前端即可。浏览器可以使用 `localhost:3000` 或 `127.0.0.1:3000`，认证请求始终走同源代理，避免登录 Cookie 和跨域来源不一致。
+
+Docker 部署使用 `standalone` 正式构建，页面、静态文件和地图资源由前端容器提供，`/api` 由 Caddy 转发。镜像构建时关闭本机 API 代理。整套应用的启动命令见 [Docker 部署指南](../deploy/README.md)。
 
 ## 当前功能与代码位置
 
@@ -21,9 +25,10 @@ pnpm dev
 | --- | --- |
 | 注册、登录、游客进入、退出 | `src/components/auth-gate.tsx` |
 | 聊天与逐步显示回答、恢复历史消息 | `src/components/chat-workspace.tsx` |
+| 每轮回复全部折叠/展开；顶部、底部及当前对话提问索引 | `src/components/response-card-group.tsx`、`src/components/conversation-navigation.tsx` |
 | 新建、切换、重命名、置顶和批量删除会话 | `src/components/session-sidebar.tsx` |
-| 首页问题建议与“换一批” | `src/components/question-suggestions.tsx` |
-| 分析表格与 CSV 下载 | `src/components/result-table.tsx` |
+| 首页任务/数据标签、综合问题与“换一批” | `src/components/question-suggestions.tsx` |
+| 按分析步骤展示表格、每页 100 行与 CSV 下载；核酸序列展开与当前查询页 FASTA 下载 | `src/components/result-table.tsx`、`src/lib/downloads.ts` |
 | 地图、柱状图、散点图与 PNG 下载 | `src/components/analysis-chart.tsx` |
 | 会话内分析记录、执行步骤与节点详情 | `src/components/trace-workspace.tsx` |
 | API 请求与前后端数据类型 | `src/lib/api.ts`、`src/lib/types.ts` |
@@ -44,6 +49,14 @@ pnpm build
 ```
 
 修改交互后，还应在页面验证对应操作，包括加载失败、登录失效和刷新后的显示。修改聊天流时，检查成功、失败和中断时的提示；修改分析展示时，检查表格、图表和来源信息。
+
+回复卡片使用一个批量切换按钮，在“全部折叠”和“全部展开”之间切换，只影响当前轮；单卡片仍可独立展开，实时生成的新卡片沿用该轮最近一次批量选择。提问索引只列当前对话的用户指令，按原顺序跳转到对应轮。浏览历史或回到顶部时暂停自动跟随，点击底部或发送新问题后恢复。折叠和索引打开状态只保存在当前页面，不写入数据库；刷新或重新打开会话时恢复默认显示。
+
+链路追溯的“数据与筛选”保留紧凑标签，用简短文字连接数据集和各轮条件。共同的数据版本、类群和标记只显示一次；实验层、排名与目标功能按实际调用分别展示。长名单显示总数，完整名单可通过标签提示及节点详情查看；原始参数和来源记录保留在详情中，未记录的范围不推断为全量分析。
+
+首页问题按任务类型和科研主题轮换，包括基础查询、丰度、多样性、环境关联与有工具支持的多步骤分析。卡片直接显示涉及的数据集原始文件名，不设折叠。空首页的输入区参与正常布局；小屏或信息较多时允许正常滚动。属/种组成表显示完整样本占比、所选类群内占比及累计占比，保留未鉴定分类，并支持导出完整返回集 CSV。
+
+分析方法按实际工具 Span 的执行顺序列出每次调用，显示调用轮次、MCP 工具本名和对应的中文说明。
 
 ## 配置与开发约定
 
