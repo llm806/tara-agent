@@ -6,7 +6,7 @@
 
 ## 首次运行与日常开发
 
-首次运行按[根目录 README](../README.md)准备工具、配置、数据和数据库，并安装前后端依赖。数据库和后端启动后，在 `frontend/` 执行：
+首次运行按[根目录 README](../README.md)准备工具、本机数据库和模型配置、校内数据服务连接，并安装前后端依赖；本机不放置科学数据集。数据库和后端启动后，在 `frontend/` 执行：
 
 ```powershell
 # 启动前端开发服务；修改代码后自动更新页面。
@@ -17,7 +17,7 @@ pnpm dev
 
 本地开发无需创建 `.env.local`。前端默认通过同源 `/api` 路径转发到 `http://127.0.0.1:8000/api`。
 
-若后端使用 8001，在 `frontend/.env.local` 设置 `TARA_API_PROXY_TARGET=http://127.0.0.1:8001`，重启前端即可。浏览器可以使用 `localhost:3000` 或 `127.0.0.1:3000`，认证请求始终走同源代理，避免登录 Cookie 和跨域来源不一致。
+若后端使用 8001，在 `frontend/.env.local` 设置 `TARA_API_PROXY_TARGET=http://127.0.0.1:8001`，重启前端即可。浏览器统一使用 `http://localhost:3000`，认证请求走同源代理。默认后端来源校验仅允许此地址；若改用其他页面地址，还需同步后端 `TARA_CORS_ORIGINS` 并重启，不能仅修改前端代理。
 
 Docker 部署使用 `standalone` 正式构建，页面、静态文件和地图资源由前端容器提供，`/api` 由 Caddy 转发。镜像构建时关闭本机 API 代理。整套应用的启动命令见 [Docker 部署指南](../deploy/README.md)。
 

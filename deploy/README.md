@@ -1,117 +1,114 @@
-# Docker 一键启动
+# 部署与维护
 
-本指南用于在本机验证完整部署，并在后续云服务器上使用同一套配置。前后端使用正式构建，不会在修改源码后自动刷新；日常编码仍按根目录 README 的开发流程启动。
+当前本地开发不放置科学数据集，通过 SSH 隧道连接校内数据服务，步骤见[根目录 README](../README.md)。服务器数据服务的启动、更新和新增数据见[README 第 3 节](../README.md#3-服务器启动更新与新增数据)。
 
-需要 Docker 和 Docker Compose；Windows 使用 Docker Desktop，并切换为 Linux 容器。后续命令都在项目根目录执行，PowerShell 和 Linux 终端均可使用 Docker 命令。
+本文说明服务器上已部署网站的 Docker 运维，以及仓库完整部署模板的适用范围。服务器命令使用 Bash，真实目录、地址、账号及凭据不写入文档。
 
-## 1. 首次运行：准备配置和数据
+## 1. 管理服务器上已部署的网站
 
-先按[根目录的数据说明](../README.md#13-放置数据集)准备四份 TSV。Docker 不会下载数据，也不会把数据集和密钥打入镜像。
+进入维护者确认的当前部署目录（包含实际使用的 `compose.yaml` 和 `.env`）：
 
-在 PowerShell 执行一次：
-
-```powershell
-# 创建部署配置。已有 deploy/.env 时保留原文件。
-Copy-Item deploy/.env.example deploy/.env
+```bash
+cd '<当前网站部署目录>'
+# 查看运行状态。
+docker compose --env-file .env -f compose.yaml ps
+# 启动或恢复服务，复用已有镜像和数据。
+docker compose --env-file .env -f compose.yaml up -d --wait
+# 查看后端最近日志。
+docker compose --env-file .env -f compose.yaml logs --tail 100 backend
+# 停止容器，保留数据卷。
+docker compose --env-file .env -f compose.yaml down
 ```
 
-Linux 上用 `cp deploy/.env.example deploy/.env` 完成相同操作。
+文件名和服务名以实际部署配置为准。不要混用不同部署目录、Compose 项目名或数据卷；当前服务器部署不等同于仓库的 `compose.production.yaml` 模板。
 
-打开 `deploy/.env`，修改 `POSTGRES_PASSWORD` 和 `DEEPSEEK_API_KEY`；数据放在其他位置时，修改 `TARA_SOURCE_DATA_DIR`。密码无需再填入数据库连接地址，启动程序会正确处理密码中的特殊字符。
+网站运行与供本地开发使用的独立数据服务分别管理：停止网站容器不等于停止独立数据服务。修改前确认本次操作针对哪一个服务。
 
-其余默认配置用于本机验证：网站地址为 `http://localhost:8080`，只允许本机访问，游客入口开放，可进入所有访客共享的测试空间。生产环境仍禁止游客登录。必须使用这个地址访问，后端会检查注册、登录和聊天请求来自哪个网站。
+## 2. 更新网站
 
-## 2. 启动：一条命令
+1. 保留当前可用发布版本，备份数据库及私有部署配置。
+2. 准备新发布包和对应镜像；离线服务器使用配套镜像包，不依赖在线拉取或现场构建。
+3. 核对新版本的环境变量、数据挂载和数据库迁移，保持原 Compose 项目名及数据卷。沿用已有部署配置中的镜像更新方式。
+4. 在当前部署目录执行启动命令应用新镜像或配置：
 
-```powershell
-# 构建前后端镜像并在后台启动；等待所有服务健康检查通过。
+```bash
+docker compose --env-file .env -f compose.yaml up -d --wait
+docker compose --env-file .env -f compose.yaml ps
+docker compose --env-file .env -f compose.yaml logs --tail 100 backend
+```
+
+通过实际网站地址访问 `/api/v1/ready`，HTTP 200 表示后端就绪；再验证登录、真实科学问题、刷新后会话和链路恢复。就绪检查不代表模型调用或全部科学功能已验收。
+
+科学代码、计算依赖或数据版本变化时，还需按根目录 README 更新独立数据服务并重启本机开发后端。更新可能短暂停机；数据库结构有变化时，回滚前确认旧代码与迁移后的数据库兼容，不能只替换旧镜像。
+
+## 3. 备份与停止
+
+需备份：数据库、私有 `.env` 和部署配置、独立保存的科学数据及版本清单。配置和备份含敏感信息，不提交 Git。
+
+在当前部署目录生成数据库备份，文件名每次使用不同时间戳：
+
+```bash
+# 使用数据库容器内实际配置的账号和库名。
+docker compose --env-file .env -f compose.yaml exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f /tmp/tara-agent.dump'
+docker compose --env-file .env -f compose.yaml cp postgres:/tmp/tara-agent.dump "./postgres-$(date +%Y%m%d-%H%M%S).dump"
+```
+
+将备份复制到独立存储，并在独立测试数据库验证恢复。重建容器通常保留数据卷，但不能代替备份。不要使用 `down -v`，它会删除该部署的数据卷。删除旧发布包或备份前，确认当前服务没有引用它且不再需要回滚或恢复。
+
+## 4. 仓库完整部署模板
+
+仓库的 `compose.production.yaml` 用于**持有核心科学数据的部署主机**，前后端使用正式构建。当前模板直接挂载原始数据，启动时运行 `tara-data`；它尚未提供无本机数据的远程数据服务部署配置，也未配置 MATOU 挂载。本地开发连接校内数据服务时，使用根目录 README 的流程。
+
+### 4.1 首次配置
+
+需要 Docker 和 Docker Compose。在项目根目录创建配置；已有配置时不要覆盖：
+
+```bash
+cp deploy/.env.example deploy/.env
+```
+
+Windows PowerShell 对应命令为 `Copy-Item deploy/.env.example deploy/.env`。
+
+编辑 `deploy/.env`：
+
+- 设置 `POSTGRES_PASSWORD`、`DEEPSEEK_API_KEY`。
+- 将 `TARA_SOURCE_DATA_DIR` 指向该部署主机的核心原始数据目录，包含 `context_general.tsv`、`context_stat.tsv`、`TARA-Oceans_18S-V4_dada2_table.tsv`、`TARA-Oceans_18S-V9_dada2_table.tsv`。这不是要求开发者在本机下载数据。
+- 其余默认值只用于回环地址上的部署测试，网站为 `http://localhost:8080`。
+
+原始数据只读挂载，不打入镜像。数据库密码由启动程序组装为连接地址，无需另外手填。
+
+### 4.2 构建与启动
+
+在项目根目录执行；该方式需要访问镜像和依赖仓库，离线环境使用维护者准备的发布包：
+
+```bash
 docker compose --env-file deploy/.env -f compose.production.yaml up -d --build --wait --wait-timeout 300
 ```
 
-首次运行会下载镜像和依赖。启动顺序是：数据库可用 → 后端检查配置、更新表结构、预处理数据 → 前后端健康检查通过 → Caddy 开放网站入口。
+启动顺序：数据库就绪 → 后端配置校验、迁移及核心数据预处理 → 前后端健康检查 → 网站入口就绪。数据和处理版本未变时复用已校验的产物，失败时不通过就绪检查。
 
-原始数据与处理代码版本没有变化时，预处理会校验并复用已有结果。配置、迁移或数据处理失败时，后端不会进入可用状态，启动命令会报告失败。首次构建或数据处理较慢时，可增大最后的等待秒数。
+后续启动、日志和停止使用同一组 `--env-file`、`-f` 参数，分别执行 `up -d --wait`、`logs --tail 100 backend` 和 `down`。代码更新需重新构建镜像；原始数据或预处理代码变化时先停止应用，再更新并启动。
 
-打开 `http://localhost:8080`，注册账号后检查：
+### 4.3 保存位置与正式对外部署
 
-1. 能登录并提交一个科学问题，例如“查询地中海表层样本”。
-2. 能查看分析结果、地图或表格，以及分析过程。
-3. 刷新页面后，消息和分析记录仍然存在。
-4. 停止后重新启动，仍能登录并找到原来的记录。
+| 内容 | 模板保存位置 |
+| --- | --- |
+| 核心原始数据 | `TARA_SOURCE_DATA_DIR` 指定的主机目录 |
+| 用户、会话、消息、分析链路 | Compose 的 `postgres_data` 卷 |
+| 核心派生数据 | Compose 的 `processed_data` 卷 |
+| Caddy 证书与配置状态 | Compose 的 `caddy_data`、`caddy_config` 卷 |
 
-健康检查确认数据、数据库和 Agent 已装配，实际模型连接是否正常要通过一次真实问题验证。
+卷的实际名称取决于 Compose 项目名，不将模板卷名当作服务器现有卷名。服务器磁盘故障仍会导致数据丢失，需独立备份。
 
-## 3. 后续启动、更新和停止
-
-```powershell
-# 日常重新启动，复用已有镜像。
-docker compose --env-file deploy/.env -f compose.production.yaml up -d --wait --wait-timeout 300
-
-# 修改代码并准备部署更新时，重新构建并启动。
-docker compose --env-file deploy/.env -f compose.production.yaml up -d --build --wait --wait-timeout 300
-
-# 停止整套应用并删除容器，保留数据库、处理数据和证书。
-docker compose --env-file deploy/.env -f compose.production.yaml down
-```
-
-更新可能短暂停机。数据库迁移只应用尚未执行的版本，不会每次重新建库。替换原始数据或修改预处理代码后，应停止整套应用，再执行更新命令，确保 API 重新加载处理结果。
-
-配置和数据位于容器之外。不要加 `down -v`，它会删除数据卷，连同数据库、处理数据和证书一起删除。
-
-## 4. 查看状态和排查失败
-
-```powershell
-# 显示每个容器的运行和健康状态。
-docker compose --env-file deploy/.env -f compose.production.yaml ps
-
-# 查看后端最近日志，定位配置、迁移、数据处理或模型调用错误。
-docker compose --env-file deploy/.env -f compose.production.yaml logs --tail 100 backend
-```
-
-网页连接失败时，可将最后一个服务名改为 `caddy` 或 `frontend` 查看对应日志。`http://localhost:8080/api/v1/ready` 返回 HTTP 200 时，后端已就绪。
-
-## 5. 数据保存和备份
-
-| 内容 | 保存位置 | 备份方法 |
-| --- | --- | --- |
-| 原始 TSV | `TARA_SOURCE_DATA_DIR` 指定的主机目录，容器只读 | 保留一份独立原始文件副本 |
-| 用户、会话、消息、分析链路 | Docker 卷 `tara-agent-deploy_postgres_data` | 用 PostgreSQL 导出，并将导出文件复制到独立存储 |
-| 预处理结果 | Docker 卷 `tara-agent-deploy_processed_data` | 可由原始数据重新生成；保留生成版本可复现历史分析 |
-| HTTPS 证书和 Caddy 配置状态 | `tara-agent-deploy_caddy_data`、`tara-agent-deploy_caddy_config` | 纳入服务器备份；丢失后需重新申请证书 |
-
-数据卷不会因重建容器消失，但服务器磁盘损坏仍会丢失数据。上云时必须配置定时数据库导出、独立存储和恢复验证。
-
-使用示例中的数据库名称和账号时，以下命令生成一次数据库备份；改过名称时相应替换：
-
-```powershell
-# 在数据库容器内生成可供 pg_restore 恢复的备份文件。
-docker compose --env-file deploy/.env -f compose.production.yaml exec -T postgres pg_dump -U tara_agent -d tara_agent -Fc -f /tmp/tara-agent.dump
-
-# 将备份复制到本机；用不同文件名保存各次备份，再复制到独立存储。
-docker compose --env-file deploy/.env -f compose.production.yaml cp postgres:/tmp/tara-agent.dump ./tara-agent.dump
-```
-
-备份文件含产品数据，不提交到 Git。恢复时先在独立空数据库用 `pg_restore` 验证，再处理正式数据库。
-
-这套部署仅增加 Caddy 作为网站入口，不引入付费软件服务。容器共用服务器 CPU、内存和磁盘，日志限制为每服务三份、每份 10 MB。数据库不可用时登录和分析无法正常保存；Caddy 不可用时网页入口无法访问。日常开发仍可采用原有前后端启动方式。
-
-## 6. 第二步：部署到云服务器
-
-本地验证通过后，准备 Ubuntu 云服务器、域名、Docker、原始数据目录和数据库备份，再修改 `deploy/.env`：
+正式对外部署时设置生产环境、真实域名与 HTTPS，在 `deploy/.env` 配置：
 
 ```dotenv
-# 替换为自己的正式域名；两个配置必须指向同一个网站。
 TARA_ENVIRONMENT=production
-TARA_SITE_ADDRESS=tara.example.com
-TARA_PUBLIC_ORIGIN=https://tara.example.com
+TARA_SITE_ADDRESS=你的域名
+TARA_PUBLIC_ORIGIN=https://你的域名
 TARA_BIND_ADDRESS=0.0.0.0
 TARA_HTTP_PORT=80
 TARA_HTTPS_PORT=443
-TARA_SOURCE_DATA_DIR=/data/tara/raw
 ```
 
-域名须解析到服务器，网络放行 80 和 443，Caddy 才能自动申请和续期公开 HTTPS 证书。生产环境登录 Cookie 只通过 HTTPS 发送；不要用 HTTP 代替。
-
-保持部署项目名称和数据卷不变，使用第 2 节同一命令启动。完成首次云部署和备份恢复验证后，再接 GitHub Actions 自动构建和部署；当前尚未加入自动部署流程。
-
-配置依据：[Docker 启动顺序](https://docs.docker.com/compose/how-tos/startup-order/)、[Next.js 正式运行文件](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)、[uv 容器安装](https://docs.astral.sh/uv/guides/integration/docker/)、[Caddy HTTPS](https://caddyserver.com/docs/automatic-https)。
+同时将 Compose 后端配置中的 `TARA_AUTH_GUEST_LOGIN_ENABLED` 改为 `"false"`；当前模板默认开启共享游客入口。域名解析及网络需支持网站访问和证书申请，生产登录依赖 HTTPS。完成数据库恢复演练、权限和真实分析验收后再开放使用。

@@ -4,7 +4,7 @@ Tara Agent 面向 Tara Oceans 数据，支持自然语言问答、数据分析�
 
 当前团队开发方式：**科学数据和计算服务部署在校内服务器，本机只运行 PostgreSQL、后端和前端，通过 SSH 隧道调用数据服务。本机不放置数据集，也不运行数据预处理。**
 
-以下命令使用 PowerShell；“项目根目录”指包含本文件的 `tara-agent/` 目录。服务器地址、账号、SSH 别名和数据服务凭据向维护者获取，不写入共享文档或 Git。访问服务器前，先连接校内网络或学校提供的 VPN。
+本机命令使用 PowerShell，服务器命令使用 Bash；“项目根目录”指包含本文件的 `tara-agent/` 目录。服务器地址、账号、SSH 别名和数据服务凭据向维护者获取，不写入共享文档或 Git。访问服务器前，先连接校内网络或学校提供的 VPN。
 
 ## 1. 首次配置
 
@@ -101,7 +101,61 @@ uv run python deploy/check_remote_data.py
 
 结束开发时，在前端、后端和隧道终端分别按 `Ctrl+C`；共享数据服务由维护者管理。本机 API 端口变更后的前端配置见[前端说明](frontend/README.md)。
 
-## 3. 拉取更新后
+## 3. 服务器：启动、更新与新增数据
+
+本节由数据服务维护者在 Linux 服务器执行，命令使用 Bash。将 `<...>` 替换为本机实际值；代码目录指含 `pyproject.toml` 的后端目录，服务端口须与本机 SSH 隧道的目标端口一致。下例使用 `8011`，已有部署以实际端口为准。
+
+### 3.1 启动现有数据服务
+
+当前使用 `deploy/start_data_service.sh`，监听 `127.0.0.1:8011`。在服务器终端执行：
+
+```bash
+cd '<当前服务版本的后端目录>'
+export TARA_MATOU_DATA_DIR='<已准备好的MATOU派生目录>'
+test -f "$TARA_MATOU_DATA_DIR/paper_task2/manifest.json" && TARA_DATA_SERVICE_PORT=8011 bash deploy/start_data_service.sh
+```
+
+出现 `Uvicorn running on http://127.0.0.1:8011` 表示已启动。若参考清单不存在，上述命令不会启动服务，应先按[后端说明](backend/README.md#论文图9图10功能对照)准备论文参考资料。该清单检查只确认文件存在，资料有效性仍由服务和验收检查。
+
+保持终端运行，按 `Ctrl+C` 停止；服务已运行时不重复启动。脚本负责加载部署所需的数据路径、令牌和锁定依赖，无需手动启动数据库或模型。首次在其他服务器部署时，维护者需先检查脚本中的本机路径、uv 位置、临时目录和凭据文件，不照搬其他机器配置；真实连接信息和凭据不写入 README。
+
+### 3.2 更新服务
+
+1. 保留当前可用代码版本和数据目录，将与本机一致的新版本放入新的服务器代码目录；离线环境使用配套发布包及依赖。检查新版本启动脚本的部署配置，保持原端口、令牌及有效数据路径。
+2. 在原服务终端按 `Ctrl+C` 停止服务；使用进程管理器的部署按原方式停止。
+3. 进入新版本后端目录，使用当前脚本启动（脚本会同步锁定依赖）：
+
+```bash
+cd '<新版本服务器后端代码目录>'
+export TARA_MATOU_DATA_DIR='<已准备好的MATOU派生目录>'
+test -f "$TARA_MATOU_DATA_DIR/paper_task2/manifest.json" && TARA_DATA_SERVICE_PORT=8011 bash deploy/start_data_service.sh
+```
+
+4. 重启本机后端，保持 SSH 隧道开启，在本机 `backend/` 执行 `uv run python deploy/check_remote_data.py`；再检查 `/api/v1/ready`。启用 MATOU 的服务另执行 `uv run python deploy/check_remote_matou.py`。验收通过后再清理旧版本；失败则恢复旧代码和原数据配置。
+
+仅改前端或普通 API 时不必更新数据服务；科学代码、工具契约或计算依赖变化时必须同步两端版本。
+
+### 3.3 更新或新增数据集
+
+| 情况 | 服务器操作 |
+| --- | --- |
+| 更新已支持的核心 TSV | 原文件保留，新数据放入独立目录；在服务器后端终端将 `TARA_DATASET_DIR` 和 `TARA_PROCESSED_DATA_DIR` 导出为新的原始及派生目录，运行 `uv run --locked tara-data`；成功后更新启动脚本中的对应路径 |
+| 接入或更新已支持的 MATOU 数据 | 按[MATOU 数据准备](backend/README.md#matou-数据准备)生成并验证新派生目录，再将启动命令中的 `TARA_MATOU_DATA_DIR` 指向新目录 |
+| 新增其他类型数据集 | 先明确格式、来源、版本、样本映射和分析需求，再实现数据目录描述、读取适配、必要预处理及工具接入；不能仅复制文件就自动开放分析 |
+
+核心 TSV 更新的准备命令（在服务器后端目录执行）：
+
+```bash
+export TARA_DATASET_DIR='<新版核心原始数据目录>'
+export TARA_PROCESSED_DATA_DIR='<新的核心派生目录>'
+uv run --locked tara-data
+```
+
+准备新核心派生目录时，已使用的研究资料包也须按新数据版本重新准备并核验，步骤见[研究任务说明](backend/RESEARCH_TASKS.md)。不要直接复制旧清单。
+
+数据准备成功后，更新启动脚本或启动命令的数据路径（注意脚本内的赋值会覆盖同名环境变量），重启服务器服务及本机后端，按第 3.2 节验收。日常启动不重复预处理；新增数据不要求开发者下载数据集。
+
+## 4. 本机拉取更新后
 
 先停止本机前后端，根据变化执行对应命令，再按第 2 节启动：
 
@@ -114,7 +168,7 @@ uv run python deploy/check_remote_data.py
 
 普通前端或 API 改动无需更新科学数据服务。本机不执行数据预处理；服务器的数据准备与维护见[后端说明](backend/README.md#校内独立数据服务)。已执行过的数据库迁移不改写，结构变化通过新增迁移完成。
 
-## 4. 修改代码后：检查改动
+## 5. 修改代码后：检查改动
 
 后端：在 `backend/` 执行，普通测试使用小型测试数据和模拟模型，不需要完整数据集或真实模型密钥。
 
@@ -133,7 +187,7 @@ pnpm build
 
 远程真实数据验证使用第 2.4 节的 `check_remote_data.py`。直接读取原始 TSV 的集成测试在具备数据的服务器环境执行，本机无需为这些测试下载数据。数据库集成测试需要独立测试数据库，配置方法见[后端说明](backend/README.md#真实数据与数据库测试)；跳过的测试不代表验证通过。
 
-## 5. 协同开发与部署
+## 6. 协同开发与部署
 
 开始修改前阅读[开发指南](AGENTS.md)和[项目方案](tara-agent方案文档.md)。后端数据处理与服务器维护见[后端说明](backend/README.md)，前端展示职责见[前端说明](frontend/README.md)。
 

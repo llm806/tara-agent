@@ -67,20 +67,21 @@ uv run tara-data --force
 | `taxon_abundance` | 计算指定类群的测序读数和样本内相对丰度 |
 | `diversity_analysis` | 计算 ASV 丰富度与 Shannon 指数，支持样本分组汇总 |
 | `environment_association` | 计算类群相对丰度与指定环境变量的 Spearman 相关 |
+| `community_analysis` | V4/V9 群落分布、多样性、环境关联、两成分 PLS 与四粒径 NMDS；依赖环境资料的步骤按准备情况开放 |
 
-配置有效的 `TARA_MATOU_DATA_DIR` 后，另提供 `find_function_samples`、`function_profile`、`function_atlas`、`compare_function_signals` 和 `retrieve_gene_sequences`。支持单样本候选信号、总体 Top20/Top100、原始样本功能谱、同采样编码的 DNA/RNA 相对贡献描述和已准备序列查询；不提供 RNA/DNA 活性或环境关联。
+数据服务配置有效的 `TARA_MATOU_DATA_DIR` 后，另提供 `find_function_samples`、`function_profile`、`function_atlas`、`function_study`、`compare_function_signals`、`retrieve_gene_sequences` 和 `function_environment`。支持候选功能谱、论文功能对照、采样编码对应的 DNA/RNA 相对信号描述及已准备序列查询；环境分析依赖相应资料包，跨库分析还需经过核验的样本映射。工具注册不保证资料前提满足，不提供 RNA/DNA 活性结论。
 
 开发与解释结果时必须保留以下边界：
 
 - V4 和 V9 分开分析；测序读数不能直接解释为细胞数量。
 - 分类查询默认按分类层级精确匹配，忽略大小写；子串匹配需要显式选择。
 - 多样性基于未经稀释抽样的测序读数，Shannon 使用自然对数；分组汇总不等于组间显著性检验。
-- 环境关联排除缺少所需环境值的样本；当前单次相关分析不做多重检验校正。
+- 环境关联排除缺少所需环境值的样本；`environment_association` 单次相关不做多重检验校正；`community_analysis` 的多项关联提供 BH 校正，不能混称。
 - 缺失值、无法计算的结果和适用限制通过结构化警告返回，不能忽略或改写为有效数值。
 
 ### 独立使用 MCP
 
-网页分析时，API 已在进程内连接 MCP 工具，无需额外启动 MCP 服务。只有外部 MCP 客户端需要独立连接时，才在 `backend/` 使用：
+网页分析时，API 已在进程内连接 MCP 工具，无需额外启动 MCP 服务。只有外部 MCP 客户端需要独立连接时，才在持有派生数据的服务器 `backend/` 使用下列命令。该入口直接读取配置的数据目录，不使用远程HTTP网关；无本机数据的开发者无需启动它：
 
 ```powershell
 # 通过标准输入输出提供当前已接入的只读分析工具。
@@ -152,13 +153,7 @@ uv run pytest -m integration
 
 开发者配置、SSH 隧道及日常检查见[根目录 README](../README.md)。实际连接信息、目录和凭据由维护者私下提供。
 
-**服务器维护者启动服务：** 配置 `TARA_DATASET_DIR`、`TARA_PROCESSED_DATA_DIR` 和 `TARA_DATA_SERVICE_TOKEN`（至少 32 字符），先按上文完成数据预处理；启用 MATOU 时另配置 `TARA_MATOU_DATA_DIR`。在服务器代码的 `backend/` 目录执行：
-
-```bash
-uv run --locked python -m uvicorn tara_agent.data_service.app:create_app --factory --host 127.0.0.1 --port 8011 --workers 1
-```
-
-服务已运行时无需重复启动。该命令前台运行，需保持终端开启；已有部署沿用维护者的私有配置。
+服务器私有配置、启动、服务升级和数据更新的操作统一见[根目录 README 第 3 节](../README.md#3-服务器启动更新与新增数据)。本节保留工具与数据准备细节。
 
 接口均要求 `Authorization: Bearer <token>`；凭据私下传输到用户目录，不提交或发到聊天。服务串行执行分析，处理结果和原始数据留在服务器。健康检查包含数据清单和代码摘要，工具调用可返回继承指定父节点的观测事件。配置远程 URL 后，本机 API、Agent、健康检查和问题建议均使用数据服务，不加载本机科学数据；连接失败明确报错，不回退本机。数据版本在后端进程内绑定，变更后需验证并重启本机后端。当前启动脚本前台运行，未提供开机自启或进程托管。
 
@@ -274,19 +269,19 @@ uv run python deploy/check_remote_function_task.py --output <新验收报告.jso
 多查询路由和回答修改在本地 Agent 层生效。科学服务版本未同步时仍拒绝调用，不能绕过版本核验。同步完成后重启本地后端，并在本地 `backend/` 执行：
 
 ```powershell
-.venv/Scripts/python.exe deploy/check_remote_data.py
+uv run python deploy/check_remote_data.py
 ```
 
 此命令验收六类核心工具及新增站点排名、双样本属组成的远程结果与来源。随后以 V9 明确提问：查询 TARA_A100000032 的位置背景，并比较 TARA_A100000005 与 TARA_A100000032 中硅藻的属级组成。真实模型和浏览器验收须在远程版本对齐后进行；本次上下文工程未扩展。
 
-## 论文图9、图10功能对照（新增）
+## 论文图9、图10功能对照
 
 `function_study` 返回合并功能类别后的 Top100 排名、相对转录贡献、粒径/海区分配表，以及 DUF285、LHC 总体和亚家族的 MetaG/MetaT 相对信号。PLS 使用固定环境变量、标准化和两个成分，返回完整输入、缺失排除数、变量相关坐标、样本坐标和解释比例；不进行显著性或预测能力检验。缺少资料、常量变量或有效观测不足时明确显示未完成。
 
 在科学服务的 `backend/` 目录准备一次作者资料。`<MATOU目录>` 为正在使用的派生数据目录；下载源目录及输出目录须尚不存在。作者版本固定为 `2647f6be2cd709f48d4dcde314be3783978afa97`，原始数据只读。`--matou-dir` 会离线扫描当前逐基因信号并准备 LHC 亚家族，不在聊天请求中扫描。
 
 ```bash
-uv sync
+uv sync --locked
 uv run python deploy/prepare_function_reference.py --download --source-dir /tmp/tara-task2-sources --output-dir <MATOU目录>/paper_task2 --matou-dir <MATOU目录>
 ```
 
@@ -306,7 +301,7 @@ uv run python deploy/check_function_study.py --source paper_reference --normaliz
 
 作者图9脚本以保留 Pfam 信号归一化，与图注所说的硅藻总转录信号分母不同。当前默认 `normalization=taxon_total`：以包含未注释基因的硅藻总信号归一化，再对采样组等权平均，保留功能不再二次归一化。明确选择 `author_script` 才返回保留功能中的贡献份额；参考重算只支持该口径。共享基因和多结构域不分摊，不能当作互斥基因组成或 RNA/DNA 活性。粒径、海区比例的分母为成功映射的该功能相对信号，映射覆盖率另列。
 
-作者参考重算的真实验证：477 个采样组，Top100 合计 56.3069%，核糖体相关 9.2177%（137 Pfam），泛素相关 4.2037%（公开表合并41 Pfam，论文文字写47），LHC/PF00504 为 2.8383%；DUF285 PLS 有416个完整采样组。参考数据不能还原 LHC 亚家族图10e，因此保留未完成状态。当前数据保留 DNA11/cDNA14，合并等价粒径和重复后计算，不能宣称与作者所有实验协议精确复现。当前远程数据、真实模型与完整图10e尚未在本次验收中运行。
+作者参考重算的真实验证：477 个采样组，Top100 合计 56.3069%，核糖体相关 9.2177%（137 Pfam），泛素相关 4.2037%（公开表合并41 Pfam，论文文字写47），LHC/PF00504 为 2.8383%；DUF285 PLS 有416个完整采样组。参考数据不能还原 LHC 亚家族图10e，因此保留未完成状态。当前数据保留 DNA11/cDNA14，合并等价粒径和重复后计算，不能宣称与作者所有实验协议精确复现。仓库保存的服务器工具验收报告已覆盖 `current_data/taxon_total` 的图9及图10b/e；详见 [RESEARCH_TASKS.md](RESEARCH_TASKS.md#已保存的服务器工具验收)。该报告不证明真实模型和浏览器端到端验收，也不代表当前运行服务必然仍处于同一版本。
 
 ## 三个研究任务的扩展与服务器升级
 
