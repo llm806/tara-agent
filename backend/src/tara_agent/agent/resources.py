@@ -110,8 +110,8 @@ CAPABILITY_PROFILE = {
 }
 
 ROUTER_PROMPT_RESOURCE = _resource("prompt.request_router", "1.11.0", ROUTER_SYSTEM_PROMPT)
-PLANNER_PROMPT_RESOURCE = _resource("prompt.tool_planner", "1.11.0", PLANNER_SYSTEM_PROMPT)
-ANSWER_PROMPT_RESOURCE = _resource("prompt.analysis_answer", "1.10.0", ANSWER_SYSTEM_PROMPT)
+PLANNER_PROMPT_RESOURCE = _resource("prompt.tool_planner", "1.12.0", PLANNER_SYSTEM_PROMPT)
+ANSWER_PROMPT_RESOURCE = _resource("prompt.analysis_answer", "1.11.0", ANSWER_SYSTEM_PROMPT)
 SELECTOR_PROMPT_RESOURCE = _resource(
     "prompt.workflow_selector", "1.4.0", WORKFLOW_SELECTOR_SYSTEM_PROMPT
 )

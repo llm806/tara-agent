@@ -114,6 +114,9 @@ def build_result_summary(
             k: len(v) for k, v in result.items() if isinstance(v, list)
         }
     if tool_name is ToolName.COMMUNITY_ANALYSIS:
+        # 描述摘要按标记、深度、粒径展开，不能被默认20行截断。
+        for field in ("latitude_bands", "size_signal_summary"):
+            summary[field] = result.get(field, [])
         # 两标记×响应×环境变量可能超过默认20行；不能整块遗漏V9统计。
         summary["associations"] = [
             {k: _compact_value(v) for k, v in row.items()} for row in result.get("associations", [])
