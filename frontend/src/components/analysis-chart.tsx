@@ -122,7 +122,7 @@ export function AnalysisChart({ chart }: AnalysisChartProps) {
             : chart.kind === "correlation_circle" ? 620 : undefined }} aria-label={chart.title} />
       </div>
       {chart.kind === "correlation_circle" && (
-        <p className="chart-reading-note">悬停查看变量名称与坐标；完整数值见对应的 PLS 变量相关坐标表。</p>
+        <p className="chart-reading-note">标签引线指向原始变量点，文字位置不代表坐标；悬停查看坐标，完整数值见 PLS 变量相关坐标表。</p>
       )}
       {error ? <p className="artifact-error" role="status">{error}</p> : null}
     </>
@@ -176,19 +176,24 @@ function chartData(chart: ChartSpec, theme: ChartTheme): Data[] {
       hovertemplate: "%{y}<br>%{fullData.name}: %{x:.2%}<extra></extra>" }));
   }
   if (chart.kind === "correlation_circle") {
-    return (chart.series ?? []).flatMap((series) => {
-      const indices = series.indices ?? [];
-      const response = series.name === "response";
-      const groups = response ? indices.map((i) => [i]) : [indices];
-      return groups.map((group, index): Data => ({ type: "scatter", mode: response ? "text+markers" : "markers", name: response ? "功能信号" : "环境变量",
-        legendgroup: series.name, showlegend: index === 0,
-        x: group.map((i) => chart.x[i]), y: group.map((i) => chart.y[i]),
-        text: group.map((i) => chart.labels[i]),
-        textposition: index % 2 ? "top right" : "bottom left",
-        textfont: { size: 14 }, marker: { size: 9, color: series.name === "response" ? theme.coral : theme.accent },
-        hovertemplate: "%{text}<br>成分1: %{x:.3f}<br>成分2: %{y:.3f}<extra></extra>" }));
+    const categories = ["environment", "MetaG", "MetaT", "response"];
+    return categories.flatMap((category): Data[] => {
+      const indices = chart.labels.map((_, i) => i).filter((i) => circleCategory(chart, i) === category);
+      if (!indices.length) return [];
+      const color = circleCategoryColor(category, theme);
+      return [{ type: "scatter", mode: "lines", showlegend: false, hoverinfo: "skip",
+        x: indices.flatMap((i) => [0, Number(chart.x[i]), null]),
+        y: indices.flatMap((i) => [0, chart.y[i], null]),
+        line: { color, width: 1 }, opacity: 0.45, connectgaps: false },
+        { type: "scatter", mode: "markers", name: circleCategoryName(category),
+        legendgroup: category, showlegend: true,
+        x: indices.map((i) => chart.x[i]), y: indices.map((i) => chart.y[i]),
+        text: indices.map((i) => chart.labels[i]),
+        marker: { size: 9, color },
+        hovertemplate: "%{text}<br>成分1: %{x:.3f}<br>成分2: %{y:.3f}<extra></extra>" }];
     });
   }
+
   if (chart.kind === "sample_map") {
     const abundance = chart.series?.find((s) => s.name === "abundance")?.values;
     const diversity = chart.series?.find((s) => s.name === "diversity")?.values;
@@ -250,6 +255,51 @@ function chartData(chart: ChartSpec, theme: ChartTheme): Data[] {
   ];
 }
 
+function circleCategory(chart: ChartSpec, index: number): string {
+  const response = chart.series?.find((s) => s.name === "response")?.indices?.includes(index);
+  if (!response) return "environment";
+  if (chart.labels[index].startsWith("MetaG_")) return "MetaG";
+  if (chart.labels[index].startsWith("MetaT_")) return "MetaT";
+  return "response";
+}
+
+function circleCategoryName(category: string): string {
+  return ({ environment: "环境变量", MetaG: "MetaG（DNA）", MetaT: "MetaT（RNA）", response: "响应指标" })[category] ?? category;
+}
+
+function circleCategoryColor(category: string, theme: ChartTheme): string {
+  return category === "environment" ? theme.accent : category === "MetaG" ? "#bd784c"
+    : category === "MetaT" ? "#c74750" : theme.coral;
+}
+
+function circleAnnotations(chart: ChartSpec, theme: ChartTheme): NonNullable<Layout["annotations"]> {
+  // 只移动文字：按原始纵坐标排序后在圆的左右两侧排开，引线保留点与名称的对应关系。
+  const annotations: NonNullable<Layout["annotations"]> = [];
+  for (const side of [-1, 1]) {
+    const indices = chart.labels.map((_, i) => i)
+      .filter((i) => (Number(chart.x[i]) < 0 ? -1 : 1) === side)
+      .sort((a, b) => chart.y[a] - chart.y[b] || a - b);
+    const spacing = Math.min(0.16, 2.28 / Math.max(1, indices.length - 1));
+    const positions = indices.map((i) => Math.max(-1.14, Math.min(1.14, chart.y[i])));
+    for (let i = 1; i < positions.length; i++) {
+      positions[i] = Math.max(positions[i], positions[i - 1] + spacing);
+    }
+    if (positions.length) positions[positions.length - 1] = Math.min(1.14, positions.at(-1)!);
+    for (let i = positions.length - 2; i >= 0; i--) {
+      positions[i] = Math.min(positions[i], positions[i + 1] - spacing);
+    }
+    indices.forEach((index, i) => {
+      const color = circleCategoryColor(circleCategory(chart, index), theme);
+      annotations.push({ x: Number(chart.x[index]), y: chart.y[index], xref: "x", yref: "y",
+        ax: side * 1.18, ay: positions[i], axref: "x", ayref: "y", text: chart.labels[index],
+        xanchor: side < 0 ? "right" : "left", yanchor: "middle", showarrow: true,
+        arrowhead: 0, arrowwidth: 0.8, arrowcolor: color, standoff: 5,
+        font: { size: 12, color }, bgcolor: "rgba(255,255,255,0.9)", borderpad: 2 });
+    });
+  }
+  return annotations;
+}
+
 function chartHeight(chart: ChartSpec): number {
   if (chart.kind === "horizontal_bar" || chart.kind === "stacked_bar") {
     return Math.max(420, chart.x.length * 30 + 160);
@@ -281,8 +331,10 @@ function chartLayout(chart: ChartSpec, theme: ChartTheme): Partial<Layout> {
         }) } };
   }
   if (chart.kind === "correlation_circle") {
-    return { ...shared, margin: { l: 65, r: 75, t: 80, b: 65 },
-      xaxis: { title: { text: chart.x_label }, range: [-1.35, 1.35], zeroline: true, gridcolor: theme.line },
+    return { ...shared, margin: { l: 65, r: 30, t: 100, b: 65 },
+      annotations: circleAnnotations(chart, theme),
+      legend: { orientation: "h", x: 0, y: 1.12 },
+      xaxis: { title: { text: chart.x_label }, range: [-2.2, 2.2], zeroline: true, gridcolor: theme.line },
       yaxis: { title: { text: chart.y_label }, range: [-1.35, 1.35], scaleanchor: "x", scaleratio: 1,
         zeroline: true, gridcolor: theme.line },
       shapes: [{ type: "circle", x0: -1, y0: -1, x1: 1, y1: 1, line: { color: theme.lineStrong, dash: "dot" } }] };
