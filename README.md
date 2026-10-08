@@ -4,7 +4,7 @@ Tara Agent 面向 Tara Oceans 数据，支持自然语言问答、数据分析�
 
 当前团队开发方式：**科学数据和计算服务部署在校内服务器，本机只运行 PostgreSQL、后端和前端，通过 SSH 隧道调用数据服务。本机不放置数据集，也不运行数据预处理。**
 
-本机命令使用 PowerShell，服务器命令使用 Bash；“项目根目录”指包含本文件的 `tara-agent/` 目录。服务器地址、账号、SSH 别名和数据服务凭据向维护者获取，不写入共享文档或 Git。访问服务器前，先连接校内网络或学校提供的 VPN。
+本机命令使用 PowerShell，服务器命令使用 Bash；“项目根目录”指包含本文件的 `tara-agent/` 目录。服务器地址、SSH 别名和数据服务凭据向维护者获取，凭据不写入共享文档或 Git；第2.1节提供经确认的当前部署路径示例。访问服务器前，先连接校内网络或学校提供的 VPN。
 
 ## 1. 首次配置
 
@@ -63,6 +63,16 @@ cd '<当前服务版本的后端目录>'
 export TARA_MATOU_DATA_DIR='<已准备好的MATOU派生目录>'
 test -f "$TARA_MATOU_DATA_DIR/paper_task2/manifest.json" && TARA_DATA_SERVICE_PORT=8011 bash deploy/start_data_service.sh
 ```
+
+当前部署示例（可直接在服务器终端执行）：
+
+```bash
+cd /home/llm/apps/tara-agent/releases/service-7f9c2ac81e63/backend
+export TARA_MATOU_DATA_DIR=/home/llm/data/tara-agent/matou/Bacillariophyta-sequences-20261006
+test -f "$TARA_MATOU_DATA_DIR/paper_task2/manifest.json" && TARA_DATA_SERVICE_PORT=8011 bash deploy/start_data_service.sh
+```
+
+此示例对应的代码版本、MATOU派生数据目录和服务端口，并非固定配置。后续发布新代码或切换数据目录时，应将命令中的路径更新为实际启用的版本；若服务端口变化，还需同步调整 SSH 隧道目标端口及本机数据服务连接配置。不要继续使用已停用或已删除的旧版本目录。
 
 看到 `Uvicorn running on http://127.0.0.1:8011` 后，保持服务器终端运行，再建立本机 SSH 隧道。参考清单不存在时命令不会启动服务，准备方法见第 3.1 节。
 
@@ -129,7 +139,7 @@ test -f "$TARA_MATOU_DATA_DIR/paper_task2/manifest.json" && TARA_DATA_SERVICE_PO
 
 出现 `Uvicorn running on http://127.0.0.1:8011` 表示已启动。若参考清单不存在，上述命令不会启动服务，应先按[后端说明](backend/README.md#论文图9图10功能对照)准备论文参考资料。该清单检查只确认文件存在，资料有效性仍由服务和验收检查。
 
-保持终端运行，按 `Ctrl+C` 停止；服务已运行时不重复启动。脚本负责加载部署所需的数据路径、令牌和锁定依赖，无需手动启动数据库或模型。首次在其他服务器部署时，维护者需先检查脚本中的本机路径、uv 位置、临时目录和凭据文件，不照搬其他机器配置；真实连接信息和凭据不写入 README。
+保持终端运行，按 `Ctrl+C` 停止；服务已运行时不重复启动。脚本负责加载部署所需的数据路径、令牌和锁定依赖，无需手动启动数据库或模型。首次在其他服务器部署时，维护者需先检查脚本中的本机路径、uv 位置、临时目录和凭据文件，不照搬其他机器配置；除第2.1节明确提供的部署路径示例外，其他连接信息使用占位符；凭据不写入README。
 
 ### 3.2 更新服务
 
