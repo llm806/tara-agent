@@ -52,9 +52,21 @@ pnpm install --frozen-lockfile
 
 ## 2. 日常开发：启动项目
 
-前提：Docker Desktop 已打开，维护者已启动服务器数据服务。下面各终端均从项目根目录开始。
+先连接校内网络或 VPN，并打开 Docker Desktop。第 2.1 节在服务器执行，其余步骤在本机项目根目录执行。
 
-### 2.1 建立 SSH 隧道（终端一）
+### 2.1 确保服务器数据服务已启动
+
+先登录服务器。服务已运行时跳过；尚未运行时，在服务器终端执行（目录替换为实际值）：
+
+```bash
+cd '<当前服务版本的后端目录>'
+export TARA_MATOU_DATA_DIR='<已准备好的MATOU派生目录>'
+test -f "$TARA_MATOU_DATA_DIR/paper_task2/manifest.json" && TARA_DATA_SERVICE_PORT=8011 bash deploy/start_data_service.sh
+```
+
+看到 `Uvicorn running on http://127.0.0.1:8011` 后，保持服务器终端运行，再建立本机 SSH 隧道。参考清单不存在时命令不会启动服务，准备方法见第 3.1 节。
+
+### 2.2 建立 SSH 隧道（终端一）
 
 将占位符替换为维护者提供的 SSH 连接别名，保持终端运行：
 
@@ -64,7 +76,7 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:18011:127.0.0.1:8011 '<SSH连接
 
 成功后终端通常没有输出。隧道关闭后，本地应用将无法访问科学数据服务。
 
-### 2.2 启动数据库和后端（终端二）
+### 2.3 启动数据库和后端（终端二）
 
 ```powershell
 docker compose up -d --wait postgres
@@ -74,7 +86,7 @@ uv run fastapi dev
 
 后端默认监听 `http://localhost:8000`，修改代码后自动重新加载。修改 `.env` 后需重启后端。
 
-### 2.3 启动前端（终端三）
+### 2.4 启动前端（终端三）
 
 ```powershell
 cd frontend
@@ -83,7 +95,7 @@ pnpm dev
 
 打开 [http://localhost:3000](http://localhost:3000)，注册账号或使用开发环境的游客入口。前端默认连接本机后端，无需创建前端配置文件；页面与 API 统一使用 `localhost`。
 
-### 2.4 检查连接与停止
+### 2.5 检查连接与停止
 
 另开终端检查本机后端就绪状态：
 
@@ -185,7 +197,7 @@ pnpm typecheck
 pnpm build
 ```
 
-远程真实数据验证使用第 2.4 节的 `check_remote_data.py`。直接读取原始 TSV 的集成测试在具备数据的服务器环境执行，本机无需为这些测试下载数据。数据库集成测试需要独立测试数据库，配置方法见[后端说明](backend/README.md#真实数据与数据库测试)；跳过的测试不代表验证通过。
+远程真实数据验证使用第 2.5 节的 `check_remote_data.py`。直接读取原始 TSV 的集成测试在具备数据的服务器环境执行，本机无需为这些测试下载数据。数据库集成测试需要独立测试数据库，配置方法见[后端说明](backend/README.md#真实数据与数据库测试)；跳过的测试不代表验证通过。
 
 ## 6. 协同开发与部署
 
