@@ -8,7 +8,7 @@
 
 ## 首次运行与日常开发
 
-首次运行按[根目录 README](../README.md)准备配置、数据和数据库，安装依赖、创建数据库表并处理数据。数据库启动后，在 `backend/` 执行：
+本地开发按[根目录 README](../README.md)配置校内数据服务连接、本机数据库和模型，安装依赖并创建数据库表。本机不放置科学数据，不运行数据预处理；保持 SSH 隧道开启后，在 `backend/` 执行：
 
 ```powershell
 # 启动后端开发服务；修改代码后自动重新加载。
@@ -21,7 +21,7 @@ uv run fastapi dev
 - `http://localhost:8000/api/v1/health`：查看数据、数据库和 Agent 的状态。
 - `http://localhost:8000/api/v1/ready`：检查是否可以提供完整服务；未就绪时返回 HTTP 503。
 
-日常启动不需要重复安装依赖、建表或处理数据。拉取更新后的条件与命令见根目录 README。
+日常启动不需要重复安装依赖或建表。拉取更新后的条件与命令见根目录 README。
 
 模型密钥 `DEEPSEEK_API_KEY` 和数据库地址 `TARA_DATABASE_URL` 放在根目录 `.env`。若已有 `backend/.env`，同名配置以它为准；终端环境变量优先于两份文件。其他后端配置见 [`.env.example`](.env.example)。
 
@@ -43,7 +43,7 @@ uv run fastapi dev
 
 ## 数据处理与科学计算
 
-原始 TSV 保持只读。运行时查询和计算读取校验后的 Parquet 文件，不直接读取原始 TSV。四份数据的名称和放置方式见根目录 README。
+本节供持有科学数据的服务器维护者使用，本地开发无需执行。原始 TSV 保持只读，运行时查询和计算读取校验后的 Parquet 文件。服务器通过 `TARA_DATASET_DIR` 指定原始数据目录，其中包含 `context_general.tsv`、`context_stat.tsv`、`TARA-Oceans_18S-V4_dada2_table.tsv` 和 `TARA-Oceans_18S-V9_dada2_table.tsv`；使用压缩文件时先解压，保留原始文件名、表头和内容。
 
 以下命令在 `backend/` 执行，仅在需要生成或更新处理结果时使用：
 
@@ -123,7 +123,7 @@ uv run pytest -m "not integration"
 uv run pytest -m integration
 ```
 
-真实数据测试要求项目根目录的 `Tara_4_Core_Datasets/` 中有四份原始 TSV；当前这些测试不会使用自定义 `TARA_DATASET_DIR`。
+直接读取原始 TSV 的真实数据测试仅在具备数据的服务器测试环境执行，要求项目根目录的 `Tara_4_Core_Datasets/` 中有四份原始 TSV；当前这些测试不会使用自定义 `TARA_DATASET_DIR`。本机无需为此下载数据，远程真实数据验证使用下文的 `deploy/check_remote_data.py`。
 
 数据库测试需先准备本地测试数据库。在单独的测试终端中，将 `TARA_DATABASE_URL` 设为该数据库的连接地址，再执行：
 
@@ -150,7 +150,15 @@ uv run pytest -m integration
 
 已提供 `tara_agent.data_service.app:create_app`。服务复用核心工具及配置后启用的 MATOU 工具，提供认证后的 `/health`、`/tools`、`/call` 和 `/suggestions`；不需要模型密钥或 PostgreSQL。请求工具名受白名单限制，工具参数由 MCP Schema 校验。`/call` 绑定科学代码摘要与核心数据 generation；MATOU 调用另绑定其独立清单摘要。客户端核验科学代码与计算依赖版本，拒绝不匹配的计算。前端及普通 API 改动无需更新科学服务。
 
-维护者启动、开发者配置、SSH 隧道及日常检查，统一见[根目录 README 第 2.4 节](../README.md#24-使用校内数据服务团队日常操作)。其中端口仅为示例；实际连接信息、目录和凭据由维护者私下提供。
+开发者配置、SSH 隧道及日常检查见[根目录 README](../README.md)。实际连接信息、目录和凭据由维护者私下提供。
+
+**服务器维护者启动服务：** 配置 `TARA_DATASET_DIR`、`TARA_PROCESSED_DATA_DIR` 和 `TARA_DATA_SERVICE_TOKEN`（至少 32 字符），先按上文完成数据预处理；启用 MATOU 时另配置 `TARA_MATOU_DATA_DIR`。在服务器代码的 `backend/` 目录执行：
+
+```bash
+uv run --locked python -m uvicorn tara_agent.data_service.app:create_app --factory --host 127.0.0.1 --port 8011 --workers 1
+```
+
+服务已运行时无需重复启动。该命令前台运行，需保持终端开启；已有部署沿用维护者的私有配置。
 
 接口均要求 `Authorization: Bearer <token>`；凭据私下传输到用户目录，不提交或发到聊天。服务串行执行分析，处理结果和原始数据留在服务器。健康检查包含数据清单和代码摘要，工具调用可返回继承指定父节点的观测事件。配置远程 URL 后，本机 API、Agent、健康检查和问题建议均使用数据服务，不加载本机科学数据；连接失败明确报错，不回退本机。数据版本在后端进程内绑定，变更后需验证并重启本机后端。当前启动脚本前台运行，未提供开机自启或进程托管。
 
