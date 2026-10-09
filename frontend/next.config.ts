@@ -10,6 +10,8 @@ const allowedDevOrigins = [
 
 const nextConfig: NextConfig = {
   agentRules: false,
+  // 科研计算和模型回答可能超过默认代理等待时间。
+  experimental: { proxyTimeout: 600_000 },
   // 生成容器运行所需的文件；本地开发仍可使用 pnpm dev。
   output: "standalone",
   allowedDevOrigins,

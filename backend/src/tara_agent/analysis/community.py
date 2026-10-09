@@ -16,6 +16,54 @@ from tara_agent.domain.contracts import DataProvenance, ResultMetadata, ResultWa
 from tara_agent.observability.contracts import ObservationKind, ObservationUpdate
 from tara_agent.observability.execution import observe
 
+
+def descriptive_summary(groups, fields, *, latitude=False):
+    """在现有分组均值上做描述统计；标记、深度及粒径独立，不合并读数。"""
+    buckets = defaultdict(list)
+    for row in groups:
+        key = (row["marker"], row["depth"], row["size_fraction"])
+        if latitude:
+            value = row.get("event_latitude")
+            if not finite(value) or abs(value) > 90:
+                continue
+            band = "0–30°" if abs(value) < 30 else "30–60°" if abs(value) < 60 else "60–90°"
+            key += (band,)
+        buckets[key].append(row)
+    result = []
+    for key, rows in sorted(buckets.items()):
+        names = ("marker", "depth", "size_fraction", "absolute_latitude_band")
+        record = dict(zip(names[: len(key)], key, strict=True))
+        record["group_count"] = len(rows)
+        record["source_sample_count"] = len({s for r in rows for s in r["sample_ids"]})
+        for field in fields:
+            values = [r[field] for r in rows if finite(r.get(field))]
+            record[field + "_n"] = len(values)
+            record[field + "_mean"] = float(np.mean(values)) if values else None
+            record[field + "_median"] = float(np.median(values)) if values else None
+        result.append(record)
+    if latitude:
+        # 显式传递带均值顺序，避免模型把有例外的总体趋势说成所有分组单调变化。
+        scopes = defaultdict(list)
+        for record in result:
+            scopes[(record["marker"], record["depth"], record["size_fraction"])].append(record)
+        for records in scopes.values():
+            records.sort(key=lambda r: r["absolute_latitude_band"])
+            for field in fields:
+                values = [r[field + "_mean"] for r in records]
+                pattern = "incomplete"
+                if len(values) == 3 and all(finite(v) for v in values):
+                    pattern = (
+                        "strictly_increasing"
+                        if values[0] < values[1] < values[2]
+                        else "strictly_decreasing"
+                        if values[0] > values[1] > values[2]
+                        else "non_monotonic_or_tied"
+                    )
+                for record in records:
+                    record[field + "_band_mean_pattern"] = pattern
+    return result
+
+
 SIZES = ("0.8-5/2000", "3/5-20", "20-180", "180-2000")
 SIZE_MAP = {
     "0.8-5": SIZES[0],
@@ -421,7 +469,9 @@ class CommunityService:
                         or (
                             f"NMDS在{query.nmds_max_iterations}次迭代预算内未收敛"
                             if not fitted["converged"]
-                            else "环境拟合有受阻变量" if not ok else None
+                            else "环境拟合有受阻变量"
+                            if not ok
+                            else None
                         ),
                     )
                 except ValueError as error:
@@ -438,6 +488,17 @@ class CommunityService:
             sections=sections,
             observations=observations,
             groups=groups,
+            latitude_bands=descriptive_summary(
+                groups,
+                (["relative_abundance"] if "distribution" in query.outputs else [])
+                + (["exp_shannon", "shannon_index"] if "diversity" in query.outputs else []),
+                latitude=True,
+            )
+            if {"distribution", "diversity"} & set(query.outputs)
+            else [],
+            size_signal_summary=descriptive_summary(groups, ["relative_abundance"])
+            if "ordination" in query.outputs
+            else [],
             associations=correlations,
             pls_results=models,
             size_composition=compositions,
@@ -466,6 +527,8 @@ class CommunityService:
                         ),
                         "asv_filter_scope": "selected_original_samples_per_marker",
                         "denominator": "all_eukaryotic_reads_before_target_filter",
+                        "denominator_metric": "relative_abundance_only",
+                        "shannon_probability_denominator": "retained_target_asv_reads",
                         "zero_target_diversity": "undefined_not_zero",
                         "method_reference": "10.1038/s41467-025-58027-7",
                     },

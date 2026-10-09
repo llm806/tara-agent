@@ -62,6 +62,8 @@ class CommunityResult(BaseModel):
     sections: list[StudySection]
     observations: list[dict]
     groups: list[dict]
+    latitude_bands: list[dict] = Field(default_factory=list)
+    size_signal_summary: list[dict] = Field(default_factory=list)
     associations: list[dict]
     pls_results: list[PLSResult]
     size_composition: list[dict]
@@ -72,6 +74,8 @@ class CommunityResult(BaseModel):
         default_factory=lambda: {
             "observations": "intermediate",
             "groups": "final",
+            "latitude_bands": "final",
+            "size_signal_summary": "final",
             "associations": "final",
             "pls_results": "final",
             "size_composition": "final",

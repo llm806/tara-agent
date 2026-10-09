@@ -101,6 +101,8 @@ const resultLists = [
   ["sample_occurrences", "样本出现记录"],
   ["observations", "观测记录"],
   ["groups", "分组摘要"],
+  ["latitude_bands", "绝对纬度带统计"],
+  ["size_signal_summary", "各粒径信号摘要"],
   ["station_leaders", "均值与最大值最高站点（并列取代表）"],
   ["composition", "样本内分类组成"],
   ["composition_summaries", "样本组成与优势类群摘要"],
@@ -264,6 +266,7 @@ function humanize(value: string): string {
     unresolved_read_count: "未鉴定到该层级的读数",
     environment_value: "环境变量值（单位见分析范围）", target_signal: "目标Pfam信号（口径见分析范围）",
     sample_names: "MATOU原样本", mapping_evidence: "样本对应证据",
+    absolute_latitude_band: "绝对纬度带", group_count: "统计分组数", source_sample_count: "原始样本数",
     marker: "18S标记", shannon_index: "Shannon指数", exp_shannon: "exp(Shannon)有效ASV数",
     taxon_read_count: "筛选后类群读数", eukaryotic_read_count: "全部真核读数分母",
     observed_asv_richness: "检出ASV数", retained_asv_count: "筛选保留ASV数",
@@ -272,10 +275,23 @@ function humanize(value: string): string {
     axis_1: "环境向量轴1", axis_2: "环境向量轴2", response: "响应指标",
   };
   if (labels[value]) return labels[value];
+  for (const [suffix, label] of [["_band_mean_pattern", "纬度带均值顺序"], ["_mean", "均值"], ["_median", "中位数"], ["_n", "有效分组数"]]) {
+    if (value.endsWith(suffix)) {
+      const field = value.slice(0, -suffix.length);
+      if (labels[field]) return `${labels[field]} · ${label}`;
+    }
+  }
   return value.replaceAll("_", " ");
 }
 
 function formatCell(column: string, value: unknown): ReactNode {
+  if (column.endsWith("_band_mean_pattern") && typeof value === "string") {
+    const patterns: Record<string, string> = {
+      strictly_increasing: "三个带均值依次升高", strictly_decreasing: "三个带均值依次降低",
+      non_monotonic_or_tied: "不严格单调或有相等值", incomplete: "有效纬度带不足",
+    };
+    return patterns[value] ?? value;
+  }
   if (column === "member_accessions" && Array.isArray(value)) {
     return <details><summary>{value.length} 个 Pfam</summary><pre>{value.join(" · ")}</pre></details>;
   }
